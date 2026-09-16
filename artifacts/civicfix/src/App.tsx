@@ -29,6 +29,30 @@ import {
 
 const queryClient = new QueryClient();
 
+type AnalysisResult = {
+  issue_type: string;
+  severity: 'low' | 'medium' | 'high';
+  description: string;
+  potential_hazard: string;
+  visual_confidence: number;
+};
+
+function readFileAsBase64(nextFile: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('The image could not be read.'));
+        return;
+      }
+      resolve(result.split(',')[1] ?? '');
+    };
+    reader.onerror = () => reject(new Error('The image could not be read.'));
+    reader.readAsDataURL(nextFile);
+  });
+}
+
 function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -37,6 +61,7 @@ function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasResult, setHasResult] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -54,6 +79,7 @@ function Home() {
     if (!nextFile) return;
     setError('');
     setHasResult(false);
+    setAnalysis(null);
     const accepted = ['image/jpeg', 'image/png', 'image/webp'];
     if (!accepted.includes(nextFile.type)) {
       setError('Please choose a JPG, PNG, or WebP image.');
@@ -80,10 +106,11 @@ function Home() {
   const removeFile = () => {
     setFile(null);
     setHasResult(false);
+    setAnalysis(null);
     setError('');
   };
 
-  const analyzeProblem = () => {
+  const analyzeProblem = async () => {
     if (!file) {
       setError('Add a photo first so CivicFix can inspect the problem.');
       return;
@@ -95,12 +122,27 @@ function Home() {
     }
     setError('');
     setHasResult(false);
+    setAnalysis(null);
     setIsAnalyzing(true);
-    window.setTimeout(() => {
+    try {
+      const imageBase64 = await readFileAsBase64(file);
+      const response = await fetch('/api/analyze-problem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mimeType: file.type, imageBase64 }),
+      });
+      const payload = (await response.json()) as AnalysisResult | { error?: string };
+      if (!response.ok) {
+        throw new Error('error' in payload && payload.error ? payload.error : 'Image analysis failed. Please try again.');
+      }
+      setAnalysis(payload as AnalysisResult);
       setIsAnalyzing(false);
       setHasResult(true);
       window.setTimeout(() => document.getElementById('analysis-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-    }, 1450);
+    } catch (analysisError) {
+      setIsAnalyzing(false);
+      setError(analysisError instanceof Error ? analysisError.message : 'Image analysis failed. Please try again.');
+    }
   };
 
   const scrollToReport = () => {
@@ -161,7 +203,7 @@ function Home() {
                   <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[hsl(var(--primary))]">01 / Start here</p>
                   <h2 className="mt-1 text-[23px] font-bold tracking-[-0.04em]">Show us what you found</h2>
                 </div>
-                <div className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[hsl(var(--accent-foreground))]">Demo mode</div>
+                 <div className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[hsl(var(--accent-foreground))]">AI analysis</div>
               </div>
               <div
                 className={`upload-zone relative flex min-h-[218px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[19px] border-2 border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background))] px-5 py-6 text-center ${isDragging ? 'is-dragging' : ''}`}
@@ -208,7 +250,7 @@ function Home() {
               <button type="button" onClick={analyzeProblem} disabled={isAnalyzing} className="focus-ring mt-5 flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-5 text-[14px] font-bold text-[hsl(var(--primary-foreground))] shadow-[0_4px_0_hsl(14_79%_39%)] transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-wait disabled:opacity-75" data-testid="button-analyze-problem">
                 {isAnalyzing ? <><LoaderCircle size={18} className="animate-spin" /> Reading your photo…</> : <>Analyze Problem <ArrowRight size={17} /></>}
               </button>
-              <p className="mt-3 text-center text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">This is a guided demo. Your photo is not sent anywhere.</p>
+               <p className="mt-3 text-center text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">Your photo is sent securely for analysis and is not stored by CivicFix.</p>
             </div>
           </div>
         </section>
@@ -219,21 +261,22 @@ function Home() {
               <div className="flex flex-col gap-8 p-5 sm:p-8 lg:flex-row lg:gap-12 lg:p-10">
                 <div className="lg:w-[34%]">
                   <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[hsl(var(--accent))]"><Check size={15} /> 02 / Your starting point</div>
-                  <h2 className="mt-5 text-[32px] font-bold leading-[0.98] tracking-[-0.05em] sm:text-[42px]">Here’s what this looks like.</h2>
-                  <p className="mt-4 max-w-sm text-[13px] leading-6 text-[rgba(250,248,242,0.68)]">A useful report starts with shared language. This demo gives you a practical read—not a final authority decision.</p>
+                   <h2 className="mt-5 text-[32px] font-bold leading-[0.98] tracking-[-0.05em] sm:text-[42px]">Here’s what we found.</h2>
+                   <p className="mt-4 max-w-sm text-[13px] leading-6 text-[rgba(250,248,242,0.68)]">This AI analysis is based only on what is visibly supported by your image. It is an estimate, not an official classification.</p>
                   <div className="mt-7 flex items-center gap-3 rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--accent))] text-[hsl(var(--secondary))]"><FileImage size={19} /></div>
-                    <div className="min-w-0"><p className="truncate text-[12px] font-bold" data-testid="text-result-file">{file?.name}</p><p className="text-[11px] text-[rgba(250,248,242,0.58)]">Photo reviewed in demo mode</p></div>
+                     <div className="min-w-0"><p className="truncate text-[12px] font-bold" data-testid="text-result-file">{file?.name}</p><p className="text-[11px] text-[rgba(250,248,242,0.58)]">Photo reviewed by CivicFix AI</p></div>
                   </div>
                 </div>
                 <div className="grid flex-1 gap-3 sm:grid-cols-2">
                    <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2">
-                     <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[hsl(var(--muted-foreground))]">PROBLEM DETECTED</p><span className="flex items-center gap-1.5 rounded-full bg-[rgba(228,87,53,0.1)] px-3 py-1 text-[11px] font-bold text-[hsl(var(--primary))]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" /> Demo result · not official</span></div>
-                     <div className="mt-4 flex flex-wrap items-end justify-between gap-5"><div><p className="text-[32px] font-bold tracking-[-0.05em]" data-testid="result-problem-type">Pothole</p></div><div className="text-left sm:text-right"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">SEVERITY</p><p className="mt-1 text-[20px] font-bold text-[hsl(var(--primary))]" data-testid="result-severity">High</p></div></div>
+                     <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[hsl(var(--muted-foreground))]">PROBLEM DETECTED</p><span className="flex items-center gap-1.5 rounded-full bg-[rgba(228,87,53,0.1)] px-3 py-1 text-[11px] font-bold text-[hsl(var(--primary))]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" /> AI estimate · not official</span></div>
+                     <div className="mt-4 flex flex-wrap items-end justify-between gap-5"><div><p className="text-[32px] font-bold capitalize tracking-[-0.05em]" data-testid="result-problem-type">{analysis?.issue_type}</p></div><div className="text-left sm:text-right"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">SEVERITY</p><p className="mt-1 text-[20px] font-bold capitalize text-[hsl(var(--primary))]" data-testid="result-severity">{analysis?.severity}</p></div></div>
                   </div>
-                   <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">LOCATION</p><p className="mt-3 flex items-start gap-2 text-[17px] font-bold leading-6" data-testid="result-location"><MapPin size={18} className="mt-1 shrink-0 text-[hsl(var(--accent))]" />Tirupati, Andhra Pradesh</p></div>
-                   <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">POTENTIAL HAZARD</p><p className="mt-3 text-[15px] font-bold leading-6" data-testid="result-hazard">May create a road-safety risk for vehicles and pedestrians.</p></div>
-                   <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">DESCRIPTION</p><p className="mt-3 max-w-2xl text-[15px] leading-7" data-testid="result-description">A large pothole appears to be present on the road surface.</p></div>
+                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">LOCATION</p><p className="mt-3 flex items-start gap-2 text-[17px] font-bold leading-6" data-testid="result-location"><MapPin size={18} className="mt-1 shrink-0 text-[hsl(var(--accent))]" />{location}</p></div>
+                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">POTENTIAL HAZARD</p><p className="mt-3 text-[15px] font-bold leading-6" data-testid="result-hazard">{analysis?.potential_hazard}</p></div>
+                    <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">DESCRIPTION</p><p className="mt-3 max-w-2xl text-[15px] leading-7" data-testid="result-description">{analysis?.description}</p></div>
+                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5 sm:col-span-2"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">VISUAL CONFIDENCE</p><p className="mt-3 text-[24px] font-bold" data-testid="result-visual-confidence">{analysis?.visual_confidence}%</p><div className="mt-3 h-2 overflow-hidden rounded-full bg-[rgba(250,248,242,0.14)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-[width] duration-500" style={{ width: `${analysis?.visual_confidence ?? 0}%` }} /></div></div>
                   <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
                      <PlaceholderCard icon={<ShieldCheck size={18} />} title="LIKELY AUTHORITY" copy="Waiting for web intelligence..." testId="result-authority" />
                      <PlaceholderCard icon={<ClipboardCheck size={18} />} title="EVIDENCE" copy="Web evidence will appear here." testId="result-evidence" />

@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: analysis
+    description: Civic problem image analysis
 paths:
   /healthz:
     get:
@@ -24,6 +26,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /analyze-problem:
+    post:
+      operationId: analyzeProblem
+      tags: [analysis]
+      summary: Analyze a civic problem image
+      description: Analyzes a civic-problem image without storing the uploaded image.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeProblemInput"
+      responses:
+        "200":
+          description: Structured visual analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeProblemResult"
+        "400":
+          description: Invalid image input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Image is too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Analysis service is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +72,57 @@ components:
           type: string
       required:
         - status
+    AnalyzeProblemInput:
+      type: object
+      properties:
+        mimeType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+        imageBase64:
+          type: string
+          minLength: 1
+          maxLength: 15000000
+      required:
+        - mimeType
+        - imageBase64
+    AnalyzeProblemResult:
+      type: object
+      properties:
+        issue_type:
+          type: string
+          enum:
+            - pothole
+            - damaged road
+            - broken streetlight
+            - garbage accumulation
+            - overflowing garbage bin
+            - blocked drain
+            - damaged sidewalk
+            - fallen/obstructing object
+            - other visible civic infrastructure problem
+            - uncertain
+        severity:
+          type: string
+          enum: [low, medium, high]
+        description:
+          type: string
+        potential_hazard:
+          type: string
+        visual_confidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+      required:
+        - issue_type
+        - severity
+        - description
+        - potential_hazard
+        - visual_confidence
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
 
