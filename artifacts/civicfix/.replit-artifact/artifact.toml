@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "CivicFix"
+description = "A civic-tech web app that helps citizens identify visible public infrastructure problems and prepare reports for the right authority."
+version = "1.0.0"
+id = "artifacts/civicfix"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25034
+
+[services.development]
+run = "pnpm --filter @workspace/civicfix run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/civicfix", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/civicfix/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25034"
+BASE_PATH = "/"
