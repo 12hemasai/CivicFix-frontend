@@ -60,4 +60,12 @@ The server validates the declared type, image signature, and 500 KB maximum size
 
 ## Current scope
 
-Database persistence, authentication, and complaint generation are not connected yet. The complaint section remains a placeholder for the next stage.
+Database persistence and authentication are not connected yet.
+The current MVP supports:
+- Civic issue image analysis
+- Location-based investigation
+- SerpApi and Google Lens search
+- Authority discovery
+- Evidence and source presentation
+- Reporting channel discovery
+- Complaint generation
