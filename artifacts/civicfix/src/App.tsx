@@ -53,6 +53,13 @@ type AuthorityResult = {
   supporting_sources: AuthoritySource[];
 };
 
+function displaySeverity(result: AnalysisResult | null): string {
+  if (!result || result.issue_type === 'uncertain' || result.visual_confidence < 65) {
+    return 'Needs manual assessment';
+  }
+  return result.severity;
+}
+
 function readFileAsBase64(nextFile: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -81,6 +88,7 @@ function Home() {
   const [authorityResult, setAuthorityResult] = useState<AuthorityResult | null>(null);
   const [isFindingAuthority, setIsFindingAuthority] = useState(false);
   const [authorityError, setAuthorityError] = useState('');
+  const [analysisStatus, setAnalysisStatus] = useState('');
   const [error, setError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -101,13 +109,14 @@ function Home() {
     setAnalysis(null);
     setAuthorityResult(null);
     setAuthorityError('');
+    setAnalysisStatus('');
     const accepted = ['image/jpeg', 'image/png', 'image/webp'];
     if (!accepted.includes(nextFile.type)) {
       setError('Please choose a JPG, PNG, or WebP image.');
       return;
     }
-    if (nextFile.size > 10 * 1024 * 1024) {
-      setError('That image is larger than 10 MB. Try a smaller photo.');
+    if (nextFile.size > 500 * 1024) {
+      setError('That image is larger than 500 KB. Google Lens accepts smaller images.');
       return;
     }
     setFile(nextFile);
@@ -130,12 +139,18 @@ function Home() {
     setAnalysis(null);
     setAuthorityResult(null);
     setAuthorityError('');
+    setAnalysisStatus('');
     setError('');
   };
 
   const findAuthority = async (issueType: string, confirmedLocation: string) => {
     setIsFindingAuthority(true);
+    setAnalysisStatus('Finding relevant civic information...');
     setAuthorityError('');
+    const statusTimers = [
+      window.setTimeout(() => setAnalysisStatus('Searching official sources...'), 400),
+      window.setTimeout(() => setAnalysisStatus('Identifying likely authority...'), 900),
+    ];
     try {
       const response = await fetch('/api/find-authority', {
         method: 'POST',
@@ -150,7 +165,9 @@ function Home() {
     } catch (authorityLookupError) {
       setAuthorityError(authorityLookupError instanceof Error ? authorityLookupError.message : 'Web intelligence is temporarily unavailable.');
     } finally {
+      statusTimers.forEach((timer) => window.clearTimeout(timer));
       setIsFindingAuthority(false);
+      setAnalysisStatus('');
     }
   };
 
@@ -170,6 +187,10 @@ function Home() {
     setAuthorityResult(null);
     setAuthorityError('');
     setIsAnalyzing(true);
+    setAnalysisStatus('Uploading image...');
+    const statusTimers = [
+      window.setTimeout(() => setAnalysisStatus('Searching image with Google Lens...'), 700),
+    ];
     try {
       const imageBase64 = await readFileAsBase64(file);
       const response = await fetch('/api/analyze-problem', {
@@ -185,10 +206,13 @@ function Home() {
       setAnalysis(analysisResult);
       setIsAnalyzing(false);
       setHasResult(true);
+      statusTimers.forEach((timer) => window.clearTimeout(timer));
       void findAuthority(analysisResult.issue_type, location.trim());
       window.setTimeout(() => document.getElementById('analysis-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     } catch (analysisError) {
+      statusTimers.forEach((timer) => window.clearTimeout(timer));
       setIsAnalyzing(false);
+      setAnalysisStatus('');
       setError(analysisError instanceof Error ? analysisError.message : 'Image analysis failed. Please try again.');
     }
   };
@@ -251,7 +275,7 @@ function Home() {
                   <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[hsl(var(--primary))]">01 / Start here</p>
                   <h2 className="mt-1 text-[23px] font-bold tracking-[-0.04em]">Show us what you found</h2>
                 </div>
-                 <div className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[hsl(var(--accent-foreground))]">AI analysis</div>
+                 <div className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[hsl(var(--accent-foreground))]">SerpApi Lens</div>
               </div>
               <div
                 className={`upload-zone relative flex min-h-[218px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[19px] border-2 border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background))] px-5 py-6 text-center ${isDragging ? 'is-dragging' : ''}`}
@@ -282,7 +306,7 @@ function Home() {
                     <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(var(--secondary))]"><CloudUpload size={25} strokeWidth={1.8} /></span>
                     <p className="text-[15px] font-bold">Drop a photo here</p>
                     <p className="mt-1 text-[13px] text-[hsl(var(--muted-foreground))]">or <span className="font-bold text-[hsl(var(--primary))]">browse from your phone</span></p>
-                    <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted-foreground))]">JPG, PNG or WebP · max 10 MB</p>
+                    <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted-foreground))]">JPG, PNG or WebP · max 500 KB</p>
                   </>
                 )}
               </div>
@@ -295,10 +319,10 @@ function Home() {
                 <input id="problem-location" type="text" value={location} onChange={(event) => { setLocation(event.target.value); setError(''); }} placeholder="Enter the problem location" className="focus-ring h-12 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background))] pl-11 pr-4 text-[14px] outline-none transition-colors placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))]" data-testid="input-problem-location" />
               </div>
               {error && <p className="mt-3 flex items-center gap-2 text-[12px] font-semibold text-[hsl(var(--destructive))]" role="alert" data-testid="status-upload-error"><CircleAlert size={15} /> {error}</p>}
-              <button type="button" onClick={analyzeProblem} disabled={isAnalyzing} className="focus-ring mt-5 flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-5 text-[14px] font-bold text-[hsl(var(--primary-foreground))] shadow-[0_4px_0_hsl(14_79%_39%)] transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-wait disabled:opacity-75" data-testid="button-analyze-problem">
-                {isAnalyzing ? <><LoaderCircle size={18} className="animate-spin" /> Reading your photo…</> : <>Analyze Problem <ArrowRight size={17} /></>}
+               <button type="button" onClick={analyzeProblem} disabled={isAnalyzing || isFindingAuthority} className="focus-ring mt-5 flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-5 text-[14px] font-bold text-[hsl(var(--primary-foreground))] shadow-[0_4px_0_hsl(14_79%_39%)] transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-wait disabled:opacity-75" data-testid="button-analyze-problem">
+                 {isAnalyzing || isFindingAuthority ? <><LoaderCircle size={18} className="animate-spin" /> {analysisStatus || 'Working…'}</> : <>Analyze Problem <ArrowRight size={17} /></>}
               </button>
-               <p className="mt-3 text-center text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">Your photo is sent securely for analysis and is not stored by CivicFix.</p>
+                <p className="mt-3 text-center text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">Your photo is sent securely to SerpApi for image search and is not stored by CivicFix.</p>
             </div>
           </div>
         </section>
@@ -310,17 +334,17 @@ function Home() {
                 <div className="lg:w-[34%]">
                   <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[hsl(var(--accent))]"><Check size={15} /> 02 / Your starting point</div>
                    <h2 className="mt-5 text-[32px] font-bold leading-[0.98] tracking-[-0.05em] sm:text-[42px]">Here’s what we found.</h2>
-                   <p className="mt-4 max-w-sm text-[13px] leading-6 text-[rgba(250,248,242,0.68)]">This AI analysis is based only on what is visibly supported by your image. It is an estimate, not an official classification.</p>
+                   <p className="mt-4 max-w-sm text-[13px] leading-6 text-[rgba(250,248,242,0.68)]">This result combines Google Lens image evidence with live web sources. It is not an official classification.</p>
                    <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.12em] text-[hsl(var(--accent))]">Web intelligence powered by SerpApi</p>
                   <div className="mt-7 flex items-center gap-3 rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--accent))] text-[hsl(var(--secondary))]"><FileImage size={19} /></div>
-                     <div className="min-w-0"><p className="truncate text-[12px] font-bold" data-testid="text-result-file">{file?.name}</p><p className="text-[11px] text-[rgba(250,248,242,0.58)]">Photo reviewed by CivicFix AI</p></div>
+                      <div className="min-w-0"><p className="truncate text-[12px] font-bold" data-testid="text-result-file">{file?.name}</p><p className="text-[11px] text-[rgba(250,248,242,0.58)]">Photo searched with Google Lens</p></div>
                   </div>
                 </div>
                 <div className="grid flex-1 gap-3 sm:grid-cols-2">
                    <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2">
-                     <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[hsl(var(--muted-foreground))]">PROBLEM DETECTED</p><span className="flex items-center gap-1.5 rounded-full bg-[rgba(228,87,53,0.1)] px-3 py-1 text-[11px] font-bold text-[hsl(var(--primary))]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" /> AI estimate · not official</span></div>
-                     <div className="mt-4 flex flex-wrap items-end justify-between gap-5"><div><p className="text-[32px] font-bold capitalize tracking-[-0.05em]" data-testid="result-problem-type">{analysis?.issue_type}</p></div><div className="text-left sm:text-right"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">SEVERITY</p><p className="mt-1 text-[20px] font-bold capitalize text-[hsl(var(--primary))]" data-testid="result-severity">{analysis?.severity}</p></div></div>
+                      <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[hsl(var(--muted-foreground))]">PROBLEM DETECTED</p><span className="flex items-center gap-1.5 rounded-full bg-[rgba(228,87,53,0.1)] px-3 py-1 text-[11px] font-bold text-[hsl(var(--primary))]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" /> Lens evidence · not official</span></div>
+                      <div className="mt-4 flex flex-wrap items-end justify-between gap-5"><div><p className="text-[32px] font-bold capitalize tracking-[-0.05em]" data-testid="result-problem-type">{analysis?.issue_type}</p></div><div className="text-left sm:text-right"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">SEVERITY</p><p className="mt-1 text-[20px] font-bold capitalize text-[hsl(var(--primary))]" data-testid="result-severity">{displaySeverity(analysis)}</p></div></div>
                   </div>
                     <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">LOCATION</p><p className="mt-3 flex items-start gap-2 text-[17px] font-bold leading-6" data-testid="result-location"><MapPin size={18} className="mt-1 shrink-0 text-[hsl(var(--accent))]" />{location}</p></div>
                     <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">POTENTIAL HAZARD</p><p className="mt-3 text-[15px] font-bold leading-6" data-testid="result-hazard">{analysis?.potential_hazard}</p></div>

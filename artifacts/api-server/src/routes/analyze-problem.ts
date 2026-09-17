@@ -3,9 +3,9 @@ import { AnalyzeProblemBody, AnalyzeProblemResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const OPENAI_MODEL = "gpt-5.4-mini";
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const MAX_IMAGE_BYTES = 500 * 1024;
+const SERPAPI_IMAGE_URL = "https://serpapi.com/image";
+const SERPAPI_SEARCH_URL = "https://serpapi.com/search.json";
 
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const ISSUE_TYPES = [
@@ -41,15 +41,12 @@ const analysisSchema = {
   additionalProperties: false,
 } as const;
 
-const SYSTEM_PROMPT = `You are CivicFix's visual civic-infrastructure analyst.
-
-Analyze only what is visually supported by the supplied image. Do not infer facts that cannot be seen, do not identify a responsible authority, and do not claim the image proves legal responsibility. Severity is only an estimate based on visible conditions.
-
-Return one JSON object matching the provided schema. Use issue_type "uncertain" when the image is unclear, does not show a civic problem, or does not provide enough visual evidence. For uncertain images, use a low confidence score and explain the limitation in description and potential_hazard.`;
-
-const USER_PROMPT = `Classify the visible civic problem, if any. Supported issue types are pothole, damaged road, broken streetlight, garbage accumulation, overflowing garbage bin, blocked drain, damaged sidewalk, fallen/obstructing object, other visible civic infrastructure problem, or uncertain.
-
-Keep description and potential_hazard grounded in visible details. Do not mention a responsible authority.`;
+type LensEvidence = {
+  titles: string[];
+  snippets: string[];
+  urls: string[];
+  text: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -72,21 +69,162 @@ function hasImageSignature(buffer: Buffer, mimeType: string): boolean {
   );
 }
 
-function parseModelContent(content: unknown): unknown {
-  if (typeof content !== "string") return null;
-  const normalized = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  try {
-    return JSON.parse(normalized) as unknown;
-  } catch {
-    return null;
-  }
+function uniqueStrings(values: string[], limit = 8): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, limit);
 }
 
-function getOpenAiContent(payload: unknown): unknown {
-  if (!isRecord(payload) || !Array.isArray(payload.choices)) return null;
-  const firstChoice = payload.choices[0];
-  if (!isRecord(firstChoice) || !isRecord(firstChoice.message)) return null;
-  return parseModelContent(firstChoice.message.content);
+function addResultFields(value: unknown, evidence: LensEvidence): void {
+  if (!isRecord(value)) return;
+  if (typeof value.title === "string") evidence.titles.push(value.title);
+  if (typeof value.name === "string") evidence.titles.push(value.name);
+  if (typeof value.snippet === "string") evidence.snippets.push(value.snippet);
+  if (typeof value.description === "string") evidence.snippets.push(value.description);
+  if (typeof value.text === "string") evidence.snippets.push(value.text);
+  if (typeof value.link === "string" && /^https?:\/\//i.test(value.link)) evidence.urls.push(value.link);
+  if (typeof value.url === "string" && /^https?:\/\//i.test(value.url)) evidence.urls.push(value.url);
+}
+
+function getLensEvidence(payload: unknown): LensEvidence {
+  const evidence: LensEvidence = { titles: [], snippets: [], urls: [], text: "" };
+  if (!isRecord(payload)) return evidence;
+
+  addResultFields(payload.knowledge_graph, evidence);
+  addResultFields(payload.search_information, evidence);
+
+  for (const key of ["visual_matches", "exact_matches", "related_content", "text_results", "image_results"]) {
+    const values = payload[key];
+    if (!Array.isArray(values)) continue;
+    for (const value of values) addResultFields(value, evidence);
+  }
+
+  evidence.titles = uniqueStrings(evidence.titles);
+  evidence.snippets = uniqueStrings(evidence.snippets);
+  evidence.urls = uniqueStrings(evidence.urls);
+  evidence.text = [...evidence.titles, ...evidence.snippets].join(" ").toLowerCase();
+  return evidence;
+}
+
+function classifyLensEvidence(evidence: LensEvidence) {
+  const candidates = [
+    {
+      issue_type: "pothole",
+      terms: ["pothole", "road crater", "road hole", "pavement hole"],
+      hazard: "A road depression or hole may create a collision, trip, or vehicle-damage risk.",
+    },
+    {
+      issue_type: "damaged road",
+      terms: ["damaged road", "road damage", "cracked asphalt", "broken pavement", "road surface"],
+      hazard: "Visible road-surface damage may create a travel or vehicle-safety risk.",
+    },
+    {
+      issue_type: "broken streetlight",
+      terms: ["streetlight", "street light", "lamp post", "lamppost", "light pole"],
+      hazard: "A non-functioning streetlight may reduce visibility and nighttime safety.",
+    },
+    {
+      issue_type: "overflowing garbage bin",
+      terms: ["overflowing bin", "overflowing garbage", "full garbage bin"],
+      hazard: "Overflowing waste may create sanitation, odor, and obstruction risks.",
+    },
+    {
+      issue_type: "garbage accumulation",
+      terms: ["garbage", "trash", "litter", "waste pile", "rubbish"],
+      hazard: "Accumulated waste may create sanitation, odor, and obstruction risks.",
+    },
+    {
+      issue_type: "blocked drain",
+      terms: ["blocked drain", "clogged drain", "storm drain", "gutter", "sewer"],
+      hazard: "A blocked drain may increase localized flooding or water-safety risk.",
+    },
+    {
+      issue_type: "damaged sidewalk",
+      terms: ["damaged sidewalk", "broken sidewalk", "broken footpath", "damaged pavement"],
+      hazard: "Damaged pedestrian surfaces may create a trip or accessibility risk.",
+    },
+    {
+      issue_type: "fallen/obstructing object",
+      terms: ["fallen tree", "fallen object", "obstruction", "debris", "blocked road"],
+      hazard: "An obstruction may create a collision, access, or pedestrian-safety risk.",
+    },
+  ] as const;
+
+  const scores = candidates
+    .map((candidate) => ({
+      candidate,
+      score: candidate.terms.reduce(
+        (score, term) => score + (evidence.text.includes(term) ? 1 : 0),
+        0,
+      ),
+    }))
+    .sort((left, right) => right.score - left.score);
+  const best = scores[0];
+
+  if (!best || best.score === 0) {
+    return {
+      issue_type: "uncertain" as const,
+      severity: "low" as const,
+      description:
+        "Google Lens returned visual matches, but they did not provide enough reliable evidence to classify a civic problem.",
+      potential_hazard: "Potential hazard could not be assessed from the available image evidence.",
+      visual_confidence: 15,
+    };
+  }
+
+  const visualConfidence = Math.min(90, best.score >= 2 ? 70 : 45);
+  const supportingEvidence = uniqueStrings([...evidence.titles, ...evidence.snippets], 3).join(" · ");
+  return {
+    issue_type: best.candidate.issue_type,
+    severity: (visualConfidence >= 65 ? "medium" : "low") as (typeof SEVERITIES)[number],
+    description: `Google Lens evidence suggests ${best.candidate.issue_type}. This is based on visual matches and returned text, not a definitive civic classification.${supportingEvidence ? ` Evidence: ${supportingEvidence}` : ""}`,
+    potential_hazard: visualConfidence >= 65 ? best.candidate.hazard : "Needs manual assessment because Lens evidence is limited.",
+    visual_confidence: visualConfidence,
+  };
+}
+
+async function uploadImage(imageBuffer: Buffer, mimeType: string, apiKey: string): Promise<string> {
+  const form = new FormData();
+  const imageBytes = new Uint8Array(imageBuffer.length);
+  imageBytes.set(imageBuffer);
+  form.append(
+    "image",
+    new Blob([imageBytes.buffer as ArrayBuffer], { type: mimeType }),
+    `civicfix-upload.${mimeType.split("/")[1]}`,
+  );
+  form.append("api_key", apiKey);
+
+  const response = await fetch(SERPAPI_IMAGE_URL, {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) throw new Error(`SerpApi image upload returned HTTP ${response.status}`);
+
+  const payload = (await response.json()) as unknown;
+  if (!isRecord(payload) || typeof payload.image_id !== "string" || payload.image_id.length === 0) {
+    throw new Error("SerpApi image upload did not return an image_id");
+  }
+  return payload.image_id;
+}
+
+async function searchGoogleLens(imageId: string, apiKey: string): Promise<LensEvidence> {
+  const params = new URLSearchParams({
+    engine: "google_lens",
+    image_id: imageId,
+    type: "all",
+    country: "in",
+    hl: "en",
+    api_key: apiKey,
+  });
+  const response = await fetch(`${SERPAPI_SEARCH_URL}?${params.toString()}`, {
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) throw new Error(`SerpApi Google Lens returned HTTP ${response.status}`);
+
+  const payload = (await response.json()) as unknown;
+  if (isRecord(payload) && typeof payload.error === "string") {
+    throw new Error("SerpApi Google Lens returned an error response");
+  }
+  return getLensEvidence(payload);
 }
 
 router.post("/analyze-problem", async (req, res) => {
@@ -111,7 +249,7 @@ router.post("/analyze-problem", async (req, res) => {
   }
 
   if (imageBuffer.length === 0 || imageBuffer.length > MAX_IMAGE_BYTES) {
-    res.status(413).json({ error: "Images must be smaller than 10 MB." });
+    res.status(413).json({ error: "Google Lens accepts images up to 500 KB." });
     return;
   }
 
@@ -120,76 +258,32 @@ router.post("/analyze-problem", async (req, res) => {
     return;
   }
 
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiKey = process.env.SERPAPI_KEY?.trim();
   if (!apiKey) {
-    res.status(503).json({ error: "Image analysis is not configured yet." });
+    res.status(503).json({ error: "SerpApi image analysis is not configured yet." });
     return;
   }
 
   try {
-    const openAiResponse = await fetch(OPENAI_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: USER_PROMPT },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${mimeType};base64,${imageBase64}`,
-                  detail: "high",
-                },
-              },
-            ],
-          },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "civic_problem_analysis",
-            strict: true,
-            schema: analysisSchema,
-          },
-        },
-        max_completion_tokens: 600,
-      }),
-    });
-
-    if (!openAiResponse.ok) {
-      req.log.error(
-        { statusCode: openAiResponse.status },
-        "OpenAI image analysis request failed",
-      );
-      if (openAiResponse.status === 401 || openAiResponse.status === 403) {
-        res.status(503).json({
-          error: "The OpenAI API key was rejected. Update OPENAI_API_KEY in Replit Secrets.",
-        });
-        return;
-      }
-      res.status(503).json({ error: "Image analysis is temporarily unavailable." });
-      return;
-    }
-
-    const openAiPayload = (await openAiResponse.json()) as unknown;
-    const validatedResult = AnalyzeProblemResponse.safeParse(getOpenAiContent(openAiPayload));
+    const imageId = await uploadImage(imageBuffer, mimeType, apiKey);
+    const evidence = await searchGoogleLens(imageId, apiKey);
+    const result = classifyLensEvidence(evidence);
+    const validatedResult = AnalyzeProblemResponse.safeParse(result);
     if (!validatedResult.success) {
-      req.log.error("OpenAI returned an invalid civic analysis shape");
+      req.log.error("SerpApi Google Lens result failed response validation");
       res.status(503).json({ error: "The image analysis response was incomplete." });
       return;
     }
 
     res.json(validatedResult.data);
   } catch (error) {
-    req.log.error({ err: error }, "Unexpected image analysis error");
-    res.status(503).json({ error: "Image analysis is temporarily unavailable." });
+    req.log.error({ err: error }, "SerpApi image analysis failed");
+    const message = String(error);
+    if (message.includes("HTTP 401") || message.includes("HTTP 403")) {
+      res.status(503).json({ error: "The SerpApi key was rejected. Update SERPAPI_KEY in Replit Secrets." });
+      return;
+    }
+    res.status(503).json({ error: "SerpApi image analysis is temporarily unavailable." });
   }
 });
 
