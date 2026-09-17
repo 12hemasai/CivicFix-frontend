@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FindAuthorityInputLocationSource } from './findAuthorityInputLocationSource';
 
 export interface FindAuthorityInput {
   /**
@@ -17,4 +18,9 @@ export interface FindAuthorityInput {
      * @maxLength 240
      */
   location: string;
+  /** @maxLength 240 */
+  exact_location?: string;
+  location_source?: FindAuthorityInputLocationSource;
+  severity: string;
+  potential_hazard: string;
 }

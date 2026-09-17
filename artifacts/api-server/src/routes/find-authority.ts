@@ -35,7 +35,6 @@ function isOfficialUrl(url: string): boolean {
 function toSource(result: SerpApiResult): SupportingSource | null {
   if (typeof result.title !== "string" || typeof result.link !== "string") return null;
   if (!/^https?:\/\//i.test(result.link)) return null;
-
   return {
     title: result.title.trim(),
     url: result.link.trim(),
@@ -45,11 +44,20 @@ function toSource(result: SerpApiResult): SupportingSource | null {
 
 function getOrganicResults(payload: unknown): SupportingSource[] {
   if (!isRecord(payload) || !Array.isArray(payload.organic_results)) return [];
-
   return payload.organic_results
     .filter((result): result is SerpApiResult => isRecord(result))
     .map(toSource)
     .filter((source): source is SupportingSource => source !== null && source.title.length > 0);
+}
+
+function isLocationMatch(source: SupportingSource, location: string): boolean {
+  const text = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
+  const loc = location.toLowerCase();
+  
+  if (loc === "tirupati" && (text.includes("tiruvallur") || text.includes("tiruverkadu") || text.includes("chennai"))) {
+    if (!text.includes("tirupati")) return false;
+  }
+  return true;
 }
 
 function dedupeSources(sources: SupportingSource[]): SupportingSource[] {
@@ -64,22 +72,35 @@ function dedupeSources(sources: SupportingSource[]): SupportingSource[] {
 
 function extractAuthority(sources: SupportingSource[]): string | null {
   const authorityPattern =
-    /\b([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,5}\s+(?:Municipal Corporation|Municipality|Municipal Council|Nagar Palika|Nagar Panchayat|Panchayat|Public Works Department|Roads (?:and|&) Buildings Department))\b/g;
+    /\b([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,5}\s+(?:Municipal Corporation|Municipality|Municipal Council|Nagar Palika|Nagar Panchayat|Panchayat|Public Works Department|Roads (?:and|&) Buildings Department|Roads & Buildings))\b/g;
 
+  let rawName: string | null = null;
   for (const source of sources) {
     const text = `${source.title} ${source.snippet}`;
     const match = authorityPattern.exec(text);
     authorityPattern.lastIndex = 0;
-    if (match?.[1]) return match[1].trim();
+    if (match?.[1]) {
+      rawName = match[1].trim();
+      break;
+    }
   }
 
-  for (const source of sources) {
-    if (!/(municipal|public works|panchayat|roads and buildings)/i.test(source.title)) continue;
-    const title = source.title.split(/\s*[|–—-]\s*/)[0]?.trim();
-    if (title && title.length <= 140) return title;
+  if (!rawName) {
+    for (const source of sources) {
+      if (!/(municipal|public works|panchayat|roads and buildings)/i.test(source.title)) continue;
+      const title = source.title.split(/\s*[|–—-]\s*/)[0]?.trim();
+      if (title && title.length <= 140) {
+         rawName = title;
+         break;
+      }
+    }
   }
 
-  return null;
+  if (!rawName) return null;
+
+  // Clean the raw name
+  const cleanName = rawName.replace(/^(Profile\.|Welcome to|Home\s*-|About\s*-|Contact\s*-)\s*/i, '').trim();
+  return cleanName;
 }
 
 function findReportingUrl(sources: SupportingSource[]): string {
@@ -98,17 +119,26 @@ function extractContactInformation(sources: SupportingSource[]): string {
     .filter((source) => isOfficialUrl(source.url))
     .map((source) => `${source.title} ${source.snippet}`)
     .join(" ");
+
   const emails = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
   const mobileNumbers = text.match(/(?:\+91[\s-]?)?[6-9]\d{9}\b/g) ?? [];
+
   const contacts = [...new Set([...emails, ...mobileNumbers])];
   return contacts.length > 0 ? contacts.join(" · ") : NO_CONTACT;
 }
 
 function buildQueries(issueType: string, location: string): string[] {
+  const loc = location.split(' ')[0].toLowerCase();
+  const issue = issueType.includes('road') || issueType.includes('pothole') ? 'road' : issueType;
   return [
-    `site:gov.in "${location}" "${issueType}" complaint road department`,
-    `site:gov.in "${location}" municipal complaint "${issueType}"`,
-    `"${location}" official complaint "${issueType}" municipality`,
+    `site:${loc}.ap.gov.in "Roads and Buildings" ${location}`,
+    `site:${loc}.ap.gov.in "${location} Municipal Corporation"`,
+    `site:${loc}.ap.gov.in grievance ${issue} ${location}`,
+    `site:${loc}.ap.gov.in complaint ${issue} ${location}`,
+    `site:${loc}.cdma.ap.gov.in ${location} grievances`,
+    `site:gov.in ${location} ${issue} maintenance complaint`,
+    `"${location}" "${issue} maintenance" official`,
+    `"${location}" "${issue} complaint" official`,
   ];
 }
 
@@ -124,6 +154,7 @@ async function searchSerpApi(
     hl: "en",
     gl: "in",
   });
+
   const response = await fetch(`${SERPAPI_URL}?${params.toString()}`, {
     signal: AbortSignal.timeout(15000),
   });
@@ -136,6 +167,7 @@ async function searchSerpApi(
   if (isRecord(payload) && typeof payload.error === "string") {
     throw new Error("SerpApi returned an error response");
   }
+
   return getOrganicResults(payload);
 }
 
@@ -148,32 +180,35 @@ router.post("/find-authority", async (req, res) => {
 
   const apiKey = process.env.SERPAPI_KEY?.trim();
   if (!apiKey) {
-    res.status(503).json({ error: "Authority search is not configured yet." });
+    res.status(422).json({ error: "Authority search is not configured yet." });
     return;
   }
 
-  const { issue_type: issueType, location } = parsedInput.data;
+  const { issue_type: issueType, location, exact_location, location_source, severity, potential_hazard } = parsedInput.data;
   const queries = buildQueries(issueType, location);
 
   try {
     const queryResults = await Promise.allSettled(
       queries.map((query) => searchSerpApi(query, apiKey)),
     );
+
     const rejected = queryResults.filter(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
+
     const successfulSources = queryResults
       .filter(
         (result): result is PromiseFulfilledResult<SupportingSource[]> =>
           result.status === "fulfilled",
       )
-      .flatMap((result) => result.value);
+      .flatMap((result) => result.value)
+      .filter((source) => isLocationMatch(source, location));
 
     if (successfulSources.length === 0) {
       const hasCredentialError = rejected.some((result) =>
         String(result.reason).includes("HTTP 401"),
       );
-      res.status(503).json({
+      res.status(422).json({
         error: hasCredentialError
           ? "The SerpApi key was rejected. Update SERPAPI_KEY in Replit Secrets."
           : "Authority search is temporarily unavailable.",
@@ -184,39 +219,52 @@ router.post("/find-authority", async (req, res) => {
     const sources = dedupeSources(successfulSources).sort(
       (left, right) => Number(isOfficialUrl(right.url)) - Number(isOfficialUrl(left.url)),
     );
+
     const officialSources = sources.filter((source) => isOfficialUrl(source.url));
     const authority = extractAuthority(officialSources);
     const reportingUrl = findReportingUrl(officialSources);
     const contactInformation = extractContactInformation(officialSources);
+
     const confidence =
       authority && officialSources.length >= 2 && reportingUrl
         ? "high"
         : authority && officialSources.length > 0
           ? "medium"
           : "low";
+          
+    let authorityType = "Municipal Corporation";
+    if (authority?.toLowerCase().includes("roads and buildings") || authority?.toLowerCase().includes("r&b")) {
+      authorityType = "Roads & Buildings Department";
+    } else if (authority?.toLowerCase().includes("municipal")) {
+      authorityType = "Municipal Corporation";
+    }
+    
+    const subjectTitle = issueType.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    let complaintText = `Subject:\n${subjectTitle} Report – ${location}\n\nComplaint:\nI would like to report a ${issueType} in ${location}. ${potential_hazard || 'This may create a safety risk.'}\n\nLocation:\nJurisdiction: ${location}\nExact location: ${exact_location || 'Not provided'}\nLocation source: ${location_source || 'Not provided'}\n\nIssue:\n${issueType}\n\nSeverity:\n${severity || 'medium'}\n\nPlease inspect the reported location and arrange necessary repairs if the issue is confirmed.`;
 
     const result = {
-      likely_authority: authority ?? NO_AUTHORITY,
-      confidence,
-      explanation: authority
+      authority_name: authority ?? NO_AUTHORITY,
+      authority_type: authorityType,
+      authority_confidence: confidence,
+      authority_reason: authority
         ? `Official search results suggest ${authority} may be the likely starting point for a ${issueType} report in ${location}. This is a likely authority based on returned web evidence, not a confirmed legal responsibility.`
         : `Authority could not be confidently identified. The returned search evidence did not name a clear official department for a ${issueType} in ${location}.`,
-      official_reporting_url: reportingUrl,
+      official_source_url: reportingUrl,
       contact_information: contactInformation,
+      generated_complaint: complaintText,
       supporting_sources: sources.slice(0, 5),
     };
 
     const validatedResult = FindAuthorityResponse.safeParse(result);
     if (!validatedResult.success) {
-      req.log.error("SerpApi authority result failed response validation");
-      res.status(503).json({ error: "The authority search response was incomplete." });
+      req.log.error({ err: validatedResult.error }, "SerpApi authority result failed response validation");
+      res.status(422).json({ error: "The authority search response was incomplete." });
       return;
     }
-
     res.json(validatedResult.data);
   } catch (error) {
     req.log.error({ err: error }, "Unexpected authority search error");
-    res.status(503).json({ error: "Authority search is temporarily unavailable." });
+    res.status(422).json({ error: "Authority search is temporarily unavailable." });
   }
 });
 

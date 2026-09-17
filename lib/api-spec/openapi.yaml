@@ -169,9 +169,21 @@ components:
           type: string
           minLength: 1
           maxLength: 240
+        exact_location:
+          type: string
+          maxLength: 240
+        location_source:
+          type: string
+          enum: ["GPS", "User provided", ""]
+        severity:
+          type: string
+        potential_hazard:
+          type: string
       required:
         - issue_type
         - location
+        - severity
+        - potential_hazard
     SupportingSource:
       type: object
       properties:
@@ -189,26 +201,32 @@ components:
     FindAuthorityResult:
       type: object
       properties:
-        likely_authority:
+        authority_name:
           type: string
-        confidence:
+        authority_type:
+          type: string
+        authority_reason:
+          type: string
+        authority_confidence:
           type: string
           enum: [high, medium, low]
-        explanation:
-          type: string
-        official_reporting_url:
+        official_source_url:
           type: string
         contact_information:
+          type: string
+        generated_complaint:
           type: string
         supporting_sources:
           type: array
           items:
             $ref: "#/components/schemas/SupportingSource"
       required:
-        - likely_authority
-        - confidence
-        - explanation
-        - official_reporting_url
+        - authority_name
+        - authority_type
+        - authority_reason
+        - authority_confidence
+        - official_source_url
         - contact_information
+        - generated_complaint
         - supporting_sources
 

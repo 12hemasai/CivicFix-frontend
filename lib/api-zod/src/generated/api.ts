@@ -52,19 +52,27 @@ export const findAuthorityBodyIssueTypeMax = 120;
 
 export const findAuthorityBodyLocationMax = 240;
 
+export const findAuthorityBodyExactLocationMax = 240;
+
 
 
 export const FindAuthorityBody = zod.object({
   "issue_type": zod.string().min(1).max(findAuthorityBodyIssueTypeMax),
-  "location": zod.string().min(1).max(findAuthorityBodyLocationMax)
+  "location": zod.string().min(1).max(findAuthorityBodyLocationMax),
+  "exact_location": zod.string().max(findAuthorityBodyExactLocationMax).optional(),
+  "location_source": zod.enum(['GPS', 'User provided', '']).optional(),
+  "severity": zod.string(),
+  "potential_hazard": zod.string()
 })
 
 export const FindAuthorityResponse = zod.object({
-  "likely_authority": zod.string(),
-  "confidence": zod.enum(['high', 'medium', 'low']),
-  "explanation": zod.string(),
-  "official_reporting_url": zod.string(),
+  "authority_name": zod.string(),
+  "authority_type": zod.string(),
+  "authority_reason": zod.string(),
+  "authority_confidence": zod.enum(['high', 'medium', 'low']),
+  "official_source_url": zod.string(),
   "contact_information": zod.string(),
+  "generated_complaint": zod.string(),
   "supporting_sources": zod.array(zod.object({
   "title": zod.string(),
   "url": zod.string().url(),

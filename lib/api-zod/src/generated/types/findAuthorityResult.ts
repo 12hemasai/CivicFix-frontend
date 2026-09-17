@@ -5,14 +5,16 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { FindAuthorityResultConfidence } from './findAuthorityResultConfidence';
+import type { FindAuthorityResultAuthorityConfidence } from './findAuthorityResultAuthorityConfidence';
 import type { SupportingSource } from './supportingSource';
 
 export interface FindAuthorityResult {
-  likely_authority: string;
-  confidence: FindAuthorityResultConfidence;
-  explanation: string;
-  official_reporting_url: string;
+  authority_name: string;
+  authority_type: string;
+  authority_reason: string;
+  authority_confidence: FindAuthorityResultAuthorityConfidence;
+  official_source_url: string;
   contact_information: string;
+  generated_complaint: string;
   supporting_sources: SupportingSource[];
 }

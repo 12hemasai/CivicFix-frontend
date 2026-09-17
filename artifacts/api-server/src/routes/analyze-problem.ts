@@ -1,9 +1,16 @@
 import { Router, type IRouter } from "express";
 import { AnalyzeProblemBody, AnalyzeProblemResponse } from "@workspace/api-zod";
 
+import multer from "multer";
+
 const router: IRouter = Router();
 
 const MAX_IMAGE_BYTES = 500 * 1024;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_IMAGE_BYTES },
+});
 const SERPAPI_IMAGE_URL = "https://serpapi.com/image";
 const SERPAPI_SEARCH_URL = "https://serpapi.com/search.json";
 
@@ -227,24 +234,17 @@ async function searchGoogleLens(imageId: string, apiKey: string): Promise<LensEv
   return getLensEvidence(payload);
 }
 
-router.post("/analyze-problem", async (req, res) => {
-  const parsedInput = AnalyzeProblemBody.safeParse(req.body);
-  if (!parsedInput.success) {
+router.post("/analyze-problem", upload.single("image"), async (req, res) => {
+  if (!req.file) {
     res.status(400).json({ error: "Provide a JPG, PNG, or WebP image to analyze." });
     return;
   }
 
-  const { mimeType, imageBase64 } = parsedInput.data;
+  const mimeType = req.file.mimetype;
+  const imageBuffer = req.file.buffer;
+
   if (!ALLOWED_MIME_TYPES.has(mimeType)) {
     res.status(400).json({ error: "Only JPG, PNG, and WebP images are supported." });
-    return;
-  }
-
-  let imageBuffer: Buffer;
-  try {
-    imageBuffer = Buffer.from(imageBase64, "base64");
-  } catch {
-    res.status(400).json({ error: "The uploaded image could not be read." });
     return;
   }
 
@@ -260,7 +260,7 @@ router.post("/analyze-problem", async (req, res) => {
 
   const apiKey = process.env.SERPAPI_KEY?.trim();
   if (!apiKey) {
-    res.status(503).json({ error: "SerpApi image analysis is not configured yet." });
+    res.status(422).json({ error: "SerpApi image analysis is not configured yet." });
     return;
   }
 
@@ -271,7 +271,7 @@ router.post("/analyze-problem", async (req, res) => {
     const validatedResult = AnalyzeProblemResponse.safeParse(result);
     if (!validatedResult.success) {
       req.log.error("SerpApi Google Lens result failed response validation");
-      res.status(503).json({ error: "The image analysis response was incomplete." });
+      res.status(422).json({ error: "The image analysis response was incomplete." });
       return;
     }
 
@@ -280,10 +280,10 @@ router.post("/analyze-problem", async (req, res) => {
     req.log.error({ err: error }, "SerpApi image analysis failed");
     const message = String(error);
     if (message.includes("HTTP 401") || message.includes("HTTP 403")) {
-      res.status(503).json({ error: "The SerpApi key was rejected. Update SERPAPI_KEY in Replit Secrets." });
+      res.status(422).json({ error: "The SerpApi key was rejected. Update SERPAPI_KEY in Replit Secrets." });
       return;
     }
-    res.status(503).json({ error: "SerpApi image analysis is temporarily unavailable." });
+    res.status(422).json({ error: "SerpApi image analysis is temporarily unavailable." });
   }
 });
 

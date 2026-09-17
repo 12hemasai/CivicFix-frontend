@@ -15,10 +15,13 @@ import {
   ExternalLink,
   FileImage,
   LoaderCircle,
+  LocateFixed,
   MapPin,
   Menu,
+  Navigation,
   RotateCcw,
   ShieldCheck,
+  Phone,
   X,
 } from 'lucide-react';
 import {
@@ -45,11 +48,13 @@ type AuthoritySource = {
 };
 
 type AuthorityResult = {
-  likely_authority: string;
-  confidence: 'high' | 'medium' | 'low';
-  explanation: string;
-  official_reporting_url: string;
+  authority_name: string;
+  authority_type: string;
+  authority_confidence: 'high' | 'medium' | 'low';
+  authority_reason: string;
+  official_source_url: string;
   contact_information: string;
+  generated_complaint: string;
   supporting_sources: AuthoritySource[];
 };
 
@@ -60,20 +65,17 @@ function displaySeverity(result: AnalysisResult | null): string {
   return result.severity;
 }
 
-function readFileAsBase64(nextFile: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== 'string') {
-        reject(new Error('The image could not be read.'));
-        return;
-      }
-      resolve(result.split(',')[1] ?? '');
-    };
-    reader.onerror = () => reject(new Error('The image could not be read.'));
-    reader.readAsDataURL(nextFile);
-  });
+function CivicFixLogo({ className = "", iconSize = 28 }: { className?: string, iconSize?: number }) {
+  return (
+    <div className={`flex items-center gap-2.5 ${className}`}>
+      <svg width={iconSize} height={iconSize} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="CivicFix Logo">
+        <rect width="32" height="32" rx="8" fill="hsl(var(--primary))" />
+        <path d="M16 8C12.134 8 9 11.134 9 15C9 20.25 16 26 16 26C16 26 23 20.25 23 15C23 11.134 19.866 8 16 8Z" stroke="hsl(var(--primary-foreground))" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M13 15L15 17L19 13" stroke="hsl(var(--primary-foreground))" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+      <span className="text-[19px] font-bold tracking-tight text-[hsl(var(--foreground))]">CivicFix</span>
+    </div>
+  );
 }
 
 function Home() {
@@ -81,6 +83,10 @@ function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [location, setLocation] = useState('');
+  const [locationMethod, setLocationMethod] = useState<'manual' | 'gps'>('manual');
+  const [exactLocation, setExactLocation] = useState('');
+  const [locationSource, setLocationSource] = useState<'User provided' | 'GPS' | ''>('');
+  const [isLocating, setIsLocating] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasResult, setHasResult] = useState(false);
@@ -155,7 +161,7 @@ function Home() {
       const response = await fetch('/api/find-authority', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue_type: issueType, location: confirmedLocation }),
+        body: JSON.stringify({ issue_type: issueType, location: confirmedLocation, exact_location: exactLocation, location_source: locationSource, severity: analysis?.severity || 'medium', potential_hazard: analysis?.potential_hazard || '' }),
       });
       const payload = (await response.json()) as AuthorityResult | { error?: string };
       if (!response.ok) {
@@ -169,6 +175,47 @@ function Home() {
       setIsFindingAuthority(false);
       setAnalysisStatus('');
     }
+  };
+
+  const requestLocation = () => {
+    setIsLocating(true);
+    setError('');
+    
+    if (!navigator.geolocation) {
+      setError('Geolocation is not supported by your browser.');
+      setIsLocating(false);
+      return;
+    }
+    
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setExactLocation(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+        setLocationSource('GPS');
+        
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`);
+          if (res.ok) {
+            const data = await res.json();
+            const city = data.address?.city || data.address?.town || data.address?.village || data.address?.county || '';
+            if (city) {
+              setLocation(city);
+            }
+          }
+        } catch (e) {
+          console.error("Reverse geocoding failed", e);
+        }
+        
+        setIsLocating(false);
+      },
+      (err) => {
+        setError(err.message || 'Unable to retrieve your location.');
+        setIsLocating(false);
+        setLocationMethod('manual');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
   };
 
   const analyzeProblem = async () => {
@@ -192,11 +239,12 @@ function Home() {
       window.setTimeout(() => setAnalysisStatus('Searching image with Google Lens...'), 700),
     ];
     try {
-      const imageBase64 = await readFileAsBase64(file);
+      const formData = new FormData();
+      formData.append('image', file);
+
       const response = await fetch('/api/analyze-problem', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mimeType: file.type, imageBase64 }),
+        body: formData,
       });
       const payload = (await response.json()) as AnalysisResult | { error?: string };
       if (!response.ok) {
@@ -226,21 +274,15 @@ function Home() {
     <main className="civic-page">
       <div className="app-shell">
         <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 lg:px-10" data-testid="header-navigation">
-          <a href="#top" className="focus-ring flex items-center gap-3 rounded-md" data-testid="link-home">
-            <span className="flex h-9 w-9 items-center justify-center rounded-[11px] bg-[hsl(var(--secondary))] text-[hsl(var(--accent))] shadow-[0_5px_0_hsl(203_35%_17%)]" aria-hidden="true">
-              <span className="text-lg font-bold">C</span>
-            </span>
-            <span className="text-[17px] font-bold tracking-[-0.03em]">CivicFix</span>
+          <a href="#top" className="focus-ring rounded-md" data-testid="link-home">
+            <CivicFixLogo />
           </a>
-          <nav className="hidden items-center gap-8 text-[13px] font-semibold text-[hsl(var(--muted-foreground))] md:flex" aria-label="Main navigation">
-            <a className="focus-ring rounded-md transition-colors hover:text-[hsl(var(--foreground))]" href="#how-it-works" data-testid="link-how-it-works">How it works</a>
-            <a className="focus-ring rounded-md transition-colors hover:text-[hsl(var(--foreground))]" href="#why-civicfix" data-testid="link-why-civicfix">Why CivicFix</a>
-            <a className="focus-ring rounded-md transition-colors hover:text-[hsl(var(--foreground))]" href="#faq" data-testid="link-faq">Questions</a>
-            <button type="button" onClick={scrollToReport} className="focus-ring rounded-full bg-[hsl(var(--secondary))] px-5 py-2.5 text-[13px] font-bold text-[hsl(var(--card))] transition-transform hover:-translate-y-0.5 active:translate-y-0" data-testid="button-start-report">Start a report</button>
-          </nav>
-          <button type="button" onClick={() => setMobileMenuOpen((open) => !open)} className="focus-ring rounded-lg p-2 md:hidden" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} data-testid="button-mobile-menu">
-            {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-          </button>
+          <div className="flex items-center gap-4">
+            <span className="hidden sm:inline-flex items-center rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-[11px] font-bold tracking-wide text-[hsl(var(--secondary-foreground))] shadow-sm">AI Civic Assistant</span>
+            <button type="button" onClick={() => setMobileMenuOpen((open) => !open)} className="focus-ring rounded-lg p-2 md:hidden" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} data-testid="button-mobile-menu">
+              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+            </button>
+          </div>
         </header>
         {mobileMenuOpen && (
           <nav className="mx-5 mb-3 flex flex-col gap-1 rounded-2xl border hairline bg-[hsl(var(--card))] p-2 shadow-[var(--shadow-soft)] md:hidden" aria-label="Mobile navigation" data-testid="mobile-navigation">
@@ -249,36 +291,25 @@ function Home() {
             <button type="button" onClick={scrollToReport} className="rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-left text-sm font-semibold text-[hsl(var(--card))]" data-testid="button-mobile-start-report">Start a report</button>
           </nav>
         )}
-
-        <section id="top" className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-14 sm:px-8 sm:pt-20 lg:grid-cols-[0.91fr_1.09fr] lg:gap-16 lg:px-10 lg:pb-28 lg:pt-24">
+        <section id="top" className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-10 sm:px-8 sm:pt-16 lg:grid-cols-[0.91fr_1.09fr] lg:gap-16 lg:px-10 lg:pb-28 lg:pt-20">
           <div className="rise-in">
-            <div className="mb-6 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">
-              <span className="h-2 w-2 rounded-full bg-[hsl(var(--primary))]" aria-hidden="true" />
-              A clearer way to care for your street
-            </div>
-            <h1 className="max-w-[600px] text-balance text-[clamp(3.4rem,8vw,6.5rem)] leading-[0.88] tracking-[-0.065em] text-[hsl(var(--foreground))]">
-              See a problem.<br /><span className="font-display italic text-[hsl(var(--primary))]">Find who can fix it.</span>
+            <h1 className="max-w-[600px] text-balance text-[clamp(2.5rem,6vw,4.5rem)] font-bold leading-[1.05] tracking-[-0.03em] text-[hsl(var(--foreground))]">
+              Turn civic problems into action.
             </h1>
-             <p className="mt-7 max-w-[480px] text-[16px] leading-7 text-[hsl(var(--muted-foreground))] sm:text-[18px]">
-               CivicFix uses AI and web intelligence to help identify civic problems and find the appropriate reporting authority.
+             <p className="mt-6 max-w-[480px] text-[17px] leading-relaxed text-[hsl(var(--muted-foreground))]">
+               Upload a photo. Identify the issue. Find the right authority. Generate a ready-to-report complaint.
              </p>
-            <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 text-[12px] font-semibold text-[hsl(var(--muted-foreground))]">
-              <span className="flex items-center gap-2"><ShieldCheck size={16} className="text-[hsl(var(--secondary))]" /> Built for everyday citizens</span>
-              <span className="hidden h-1 w-1 rounded-full bg-[hsl(var(--border))] sm:block" />
-              <span>No account needed</span>
-            </div>
           </div>
           <div id="report" className="rise-in rise-in-delay scroll-mt-6">
-            <div className="relative rounded-[27px] border border-[rgba(60,76,67,0.14)] bg-[hsl(var(--card))] p-4 shadow-[var(--shadow-card)] sm:p-6">
-              <div className="mb-5 flex items-start justify-between gap-4 px-1">
+            <div className="relative rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-sm sm:p-7">
+              <div className="mb-6 flex items-start justify-between gap-4 px-1">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[hsl(var(--primary))]">01 / Start here</p>
-                  <h2 className="mt-1 text-[23px] font-bold tracking-[-0.04em]">Show us what you found</h2>
-                </div>
-                 <div className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[hsl(var(--accent-foreground))]">SerpApi Lens</div>
+                  <h2 className="text-[18px] font-bold tracking-tight text-[hsl(var(--foreground))]">Upload a civic issue</h2>
+                  <p className="mt-1 text-[13px] text-[hsl(var(--muted-foreground))]">Roads, potholes, garbage, streetlights and more</p>
+                </div> 
               </div>
               <div
-                className={`upload-zone relative flex min-h-[218px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[19px] border-2 border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background))] px-5 py-6 text-center ${isDragging ? 'is-dragging' : ''}`}
+                className={`upload-zone relative flex min-h-[220px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-5 py-6 text-center transition-all hover:border-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/0.02)] ${isDragging ? 'is-dragging border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.02)]' : ''}`}
                 onClick={() => fileInputRef.current?.click()}
                 onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
@@ -293,20 +324,18 @@ function Home() {
                 {previewUrl ? (
                   <>
                     <img src={previewUrl} alt="Preview of the selected infrastructure problem" className="absolute inset-0 h-full w-full object-cover" data-testid="img-photo-preview" />
-                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-[rgba(27,43,38,0.88)] px-4 py-3 text-left text-[hsl(var(--card))]">
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10 text-white">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-bold" data-testid="text-photo-name">{file?.name}</p>
-                        <p className="text-[11px] text-[rgba(250,248,242,0.68)]">Ready to inspect</p>
+                        <p className="truncate text-[13px] font-medium drop-shadow-md" data-testid="text-photo-name">{file?.name}</p>
                       </div>
-                      <button type="button" onClick={(event) => { event.stopPropagation(); removeFile(); }} className="focus-ring ml-3 shrink-0 rounded-lg border border-[rgba(250,248,242,0.3)] p-2 transition-colors hover:bg-[rgba(250,248,242,0.12)]" aria-label="Remove selected photo" data-testid="button-remove-photo"><X size={17} /></button>
+                      <button type="button" onClick={(event) => { event.stopPropagation(); removeFile(); }} className="focus-ring ml-3 shrink-0 rounded-md bg-white/20 p-1.5 backdrop-blur-md transition-colors hover:bg-white/30" aria-label="Remove selected photo" data-testid="button-remove-photo"><X size={16} /></button>
                     </div>
                   </>
                 ) : (
                   <>
-                    <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(var(--secondary))]"><CloudUpload size={25} strokeWidth={1.8} /></span>
-                    <p className="text-[15px] font-bold">Drop a photo here</p>
-                    <p className="mt-1 text-[13px] text-[hsl(var(--muted-foreground))]">or <span className="font-bold text-[hsl(var(--primary))]">browse from your phone</span></p>
-                    <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-[hsl(var(--muted-foreground))]">JPG, PNG or WebP · max 500 KB</p>
+                    <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[hsl(var(--background))] text-[hsl(var(--primary))] shadow-sm"><FileImage size={24} strokeWidth={1.5} /></span>
+                    <span className="inline-flex rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-[13px] font-semibold text-[hsl(var(--primary-foreground))] shadow-sm">Choose photo</span>
+                    <p className="mt-4 text-[12px] font-medium text-[hsl(var(--muted-foreground))]">JPG, PNG or WEBP · Max 500 KB</p>
                   </>
                 )}
               </div>
@@ -314,15 +343,57 @@ function Home() {
                 <button type="button" onClick={() => fileInputRef.current?.click()} className="focus-ring mt-3 flex items-center gap-2 px-1 text-[12px] font-bold text-[hsl(var(--secondary))]" data-testid="button-replace-photo"><RotateCcw size={13} /> Replace photo</button>
               )}
               <label htmlFor="problem-location" className="mt-5 block text-[12px] font-bold text-[hsl(var(--foreground))]">Where is the problem?</label>
-              <div className="relative mt-2">
-                <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" size={18} />
-                <input id="problem-location" type="text" value={location} onChange={(event) => { setLocation(event.target.value); setError(''); }} placeholder="Enter the problem location" className="focus-ring h-12 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background))] pl-11 pr-4 text-[14px] outline-none transition-colors placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))]" data-testid="input-problem-location" />
+              <label htmlFor="problem-location" className="mt-8 block text-[15px] font-bold tracking-tight text-[hsl(var(--foreground))]">Where is the problem?</label>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => { setLocationMethod('gps'); requestLocation(); }}
+                  className={`focus-ring flex-1 rounded-xl border py-3 text-[13px] font-medium transition-colors ${locationMethod === 'gps' ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)] text-[hsl(var(--primary))]' : 'border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary)/0.5)]'}`}
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    {isLocating ? <LoaderCircle size={16} className="animate-spin" /> : <LocateFixed size={16} />}
+                    Use my current location
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLocationMethod('manual'); setLocationSource('User provided'); setExactLocation(''); }}
+                  className={`focus-ring flex-1 rounded-xl border py-3 text-[13px] font-medium transition-colors ${locationMethod === 'manual' ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)] text-[hsl(var(--primary))]' : 'border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary)/0.5)]'}`}
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    <MapPin size={16} /> Enter location manually
+                  </span>
+                </button>
               </div>
-              {error && <p className="mt-3 flex items-center gap-2 text-[12px] font-semibold text-[hsl(var(--destructive))]" role="alert" data-testid="status-upload-error"><CircleAlert size={15} /> {error}</p>}
-               <button type="button" onClick={analyzeProblem} disabled={isAnalyzing || isFindingAuthority} className="focus-ring mt-5 flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-5 text-[14px] font-bold text-[hsl(var(--primary-foreground))] shadow-[0_4px_0_hsl(14_79%_39%)] transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-wait disabled:opacity-75" data-testid="button-analyze-problem">
-                 {isAnalyzing || isFindingAuthority ? <><LoaderCircle size={18} className="animate-spin" /> {analysisStatus || 'Working…'}</> : <>Analyze Problem <ArrowRight size={17} /></>}
+
+              {locationMethod === 'manual' ? (
+                <div className="relative mt-4">
+                  <input id="problem-location" type="text" value={location} onChange={(event) => { setLocation(event.target.value); setError(''); setLocationSource('User provided'); setExactLocation(''); }} placeholder="Enter city or area" className="focus-ring h-12 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 text-[14px] outline-none transition-colors placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))]" data-testid="input-problem-location" />
+                  {location && (
+                    <p className="mt-2 text-[12px] text-[hsl(var(--muted-foreground))]">
+                      ✓ Location: {location} <br/>User-provided · Exact location not provided
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] p-4 text-[13px] text-[hsl(var(--foreground))]">
+                  {isLocating ? (
+                    <span className="flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" /> Acquiring GPS signal...</span>
+                  ) : location ? (
+                    <span className="flex flex-col gap-1">
+                      <span className="flex items-center gap-2 font-medium text-[hsl(var(--primary))]"><Check size={16} /> Location: {location}</span>
+                      <span className="text-[hsl(var(--muted-foreground))]">GPS-provided · Exact location provided</span>
+                    </span>
+                  ) : (
+                    'Location pending...'
+                  )}
+                </div>
+              )}
+              {error && <p className="mt-4 flex items-center gap-2 rounded-lg bg-[hsl(var(--destructive)/0.1)] p-3 text-[13px] font-semibold text-[hsl(var(--destructive))]" role="alert" data-testid="status-upload-error"><CircleAlert size={16} /> {error}</p>}
+               <button type="button" onClick={analyzeProblem} disabled={isAnalyzing || isFindingAuthority} className="focus-ring mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-6 text-[15px] font-bold text-[hsl(var(--primary-foreground))] shadow-sm transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-wait disabled:opacity-75" data-testid="button-analyze-problem">
+                 {isAnalyzing || isFindingAuthority ? <><LoaderCircle size={18} className="animate-spin" /> {analysisStatus || 'Working…'}</> : <>Analyze Problem <ArrowRight size={18} /></>}
               </button>
-                <p className="mt-3 text-center text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">Your photo is sent securely to SerpApi for image search and is not stored by CivicFix.</p>
+                <p className="mt-4 text-center text-[12px] text-[hsl(var(--muted-foreground))]">Your photo is sent securely to SerpApi for image search and is not stored by CivicFix.</p>
             </div>
           </div>
         </section>
@@ -346,14 +417,25 @@ function Home() {
                       <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[hsl(var(--muted-foreground))]">PROBLEM DETECTED</p><span className="flex items-center gap-1.5 rounded-full bg-[rgba(228,87,53,0.1)] px-3 py-1 text-[11px] font-bold text-[hsl(var(--primary))]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" /> Lens evidence · not official</span></div>
                       <div className="mt-4 flex flex-wrap items-end justify-between gap-5"><div><p className="text-[32px] font-bold capitalize tracking-[-0.05em]" data-testid="result-problem-type">{analysis?.issue_type}</p></div><div className="text-left sm:text-right"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">SEVERITY</p><p className="mt-1 text-[20px] font-bold capitalize text-[hsl(var(--primary))]" data-testid="result-severity">{displaySeverity(analysis)}</p></div></div>
                   </div>
-                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">LOCATION</p><p className="mt-3 flex items-start gap-2 text-[17px] font-bold leading-6" data-testid="result-location"><MapPin size={18} className="mt-1 shrink-0 text-[hsl(var(--accent))]" />{location}</p></div>
-                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">POTENTIAL HAZARD</p><p className="mt-3 text-[15px] font-bold leading-6" data-testid="result-hazard">{analysis?.potential_hazard}</p></div>
-                    <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">DESCRIPTION</p><p className="mt-3 max-w-2xl text-[15px] leading-7" data-testid="result-description">{analysis?.description}</p></div>
-                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5 sm:col-span-2"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">VISUAL CONFIDENCE</p><p className="mt-3 text-[24px] font-bold" data-testid="result-visual-confidence">{analysis?.visual_confidence}%</p><div className="mt-3 h-2 overflow-hidden rounded-full bg-[rgba(250,248,242,0.14)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-[width] duration-500" style={{ width: `${analysis?.visual_confidence ?? 0}%` }} /></div></div>
-                  <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
-                      <AuthorityCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
-                      <EvidenceCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
-                     <PlaceholderCard icon={<ArrowDownRight size={18} />} title="COMPLAINT" copy="The AI-generated complaint will appear here." testId="result-complaint" />
+                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">LOCATION</p>
+                      <p className="mt-3 flex items-start gap-2 text-[17px] font-bold leading-6" data-testid="result-location">
+                        <MapPin size={18} className="mt-1 shrink-0 text-[hsl(var(--accent))]" />
+                        {location}
+                      </p>
+                      <p className="mt-3 text-[11px] leading-5 text-[hsl(var(--muted-foreground))]" data-testid="result-exact-location">
+                        <span className="font-bold text-[hsl(var(--foreground))]">Exact location:</span> {exactLocation ? <span className="text-[hsl(var(--primary))] font-medium">Available</span> : 'Not provided'}<br/>
+                        <span className="font-bold text-[hsl(var(--foreground))]">Source:</span> {locationSource || 'User provided'}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-[hsl(var(--primary)/0.05)] p-5 border border-[hsl(var(--border))]"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">POTENTIAL HAZARD</p><p className="mt-3 text-[15px] font-bold leading-6" data-testid="result-hazard">{analysis?.potential_hazard}</p></div>
+                    <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2 border border-[hsl(var(--border))]"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">DESCRIPTION</p><p className="mt-3 max-w-2xl text-[15px] leading-7" data-testid="result-description">{analysis?.description}</p></div>
+                  <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+                      <AuthorityCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} location={location} exactLocation={exactLocation} />
+                      <div className="grid gap-3">
+                        <EvidenceCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
+                        <ComplaintCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
+                      </div>
                   </div>
                 </div>
               </div>
@@ -396,64 +478,203 @@ function Home() {
           <div className="mx-auto max-w-3xl"><p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">Questions, answered</p><h2 className="mt-4 text-[42px] tracking-[-0.055em] sm:text-[55px]">Before you report</h2><div className="mt-9"><Faq question="Do I need to know which department is responsible?" answer="No. That is part of the work CivicFix is designed to help with. Start with what you can see and where you found it." /><Faq question="Is this already connected to a government complaint system?" answer="Not yet. This experience is a guided demo, so authority and complaint details are intentionally shown as placeholders rather than external data." /><Faq question="What makes a good photo?" answer="Stand far enough back to show context, then include a closer view of the issue. Avoid faces, vehicle plates, and anything personally identifying." /></div></div>
         </section>
 
-        <footer className="border-t hairline bg-[hsl(var(--secondary))] px-5 py-9 text-[hsl(var(--card))] sm:px-8 lg:px-10">
-          <div className="mx-auto flex max-w-7xl flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-[hsl(var(--accent))] text-[hsl(var(--secondary))] text-sm font-bold">C</span><span className="font-bold tracking-[-0.03em]">CivicFix</span></div><p className="text-[12px] text-[rgba(250,248,242,0.55)]">Make the visible problems easier to act on.</p><p className="text-[11px] text-[rgba(250,248,242,0.4)]">Prototype · 2024</p></div>
+        <footer className="border-t hairline bg-[hsl(var(--card))] px-5 py-9 text-[hsl(var(--foreground))] sm:px-8 lg:px-10">
+          <div className="mx-auto flex max-w-7xl flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><CivicFixLogo iconSize={24} className="opacity-90" /><p className="text-[12px] text-[hsl(var(--muted-foreground))]">Make the visible problems easier to act on.</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">Prototype · 2026</p></div>
         </footer>
       </div>
     </main>
   );
 }
 
-function AuthorityCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+function AuthorityCard({ result, isLoading, error, location, exactLocation }: { result: AuthorityResult | null; isLoading: boolean; error: string, location: string, exactLocation: string }) {
+  if (isLoading) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
+        <p className="mt-4 flex items-center gap-2 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]"><LoaderCircle size={16} className="animate-spin" /> Checking official sources…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
+        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">{error}</p>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
+        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">Waiting for web intelligence…</p>
+      </div>
+    );
+  }
+
+  const mapConfidence = (c: string) => {
+    if (c === 'high') return 'Strong';
+    if (c === 'medium') return 'Moderate';
+    return 'Limited';
+  };
+
+  const contacts = result.contact_information && result.contact_information !== 'No official contact information was found.' 
+    ? result.contact_information.split(' · ') 
+    : [];
+
   return (
-    <div className="rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-4" data-testid="result-authority">
-      <div className="flex items-center gap-2 text-[hsl(var(--accent))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">LIKELY AUTHORITY</p></div>
-      {isLoading ? (
-        <p className="mt-3 flex items-center gap-2 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]"><LoaderCircle size={14} className="animate-spin" /> Checking official sources…</p>
-      ) : error ? (
-        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">{error}</p>
-      ) : result ? (
-        <>
-          <p className="mt-3 text-[16px] font-bold leading-5" data-testid="result-authority-name">{result.likely_authority || 'Authority not available'}</p>
-          <span className="mt-3 inline-flex rounded-full border border-[rgba(250,248,242,0.16)] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] text-[hsl(var(--accent))]" data-testid="result-authority-confidence">{result.confidence || 'low'} confidence</span>
-          <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]" data-testid="result-authority-reason">{result.explanation || 'No reason was returned.'}</p>
-          {result.official_reporting_url ? (
-            <a href={result.official_reporting_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-[hsl(var(--accent))] hover:underline" data-testid="result-complaint-url">Official reporting channel <ExternalLink size={12} /></a>
-          ) : (
-            <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.45)]">No official complaint URL found.</p>
-          )}
-          <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]" data-testid="result-contact-information">{result.contact_information || 'No official contact information was found.'}</p>
-        </>
-      ) : (
-        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">Waiting for web intelligence…</p>
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)] text-[hsl(var(--foreground))]" data-testid="result-authority">
+      <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
+      
+      <p className="mt-4 text-[22px] font-bold leading-7 tracking-tight" data-testid="result-authority-name">{result.authority_name || 'Authority not available'}</p>
+      
+      <span className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2.5 py-1 text-[11px] font-semibold text-[hsl(var(--muted-foreground))]" data-testid="result-authority-confidence">
+        Evidence strength: {mapConfidence(result.authority_confidence || 'low')}
+      </span>
+
+      <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">WHY THIS AUTHORITY?</p>
+        <p className="mt-2 text-[13px] leading-6 text-[hsl(var(--foreground))]" data-testid="result-authority-reason">{result.authority_reason || 'No reason was returned.'}</p>
+      </div>
+
+      <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">WHAT WOULD CHANGE THIS RESULT?</p>
+        <p className="mt-2 text-[13px] leading-6 text-[hsl(var(--foreground))]">Exact road jurisdiction cannot be confirmed because the user provided {location} but not the specific street, landmark, road number, or GPS location.</p>
+      </div>
+
+      <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">REPORTING CHANNEL</p>
+        {result.official_source_url ? (
+          <a href={result.official_source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-[hsl(var(--primary))] hover:underline" data-testid="result-complaint-url">
+            {result.official_source_url.toLowerCase().includes('grievance') ? 'General government grievance channel' : 'Verified official reporting channel'} <ExternalLink size={14} />
+          </a>
+        ) : (
+          <p className="mt-2 text-[13px] leading-6 text-[hsl(var(--muted-foreground))]">No official complaint URL found.</p>
+        )}
+      </div>
+
+      {contacts.length > 0 && (
+        <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">OFFICIAL CONTACT</p>
+          <ul className="mt-3 space-y-4">
+            {contacts.map((contact, i) => (
+              <li key={i} className="flex flex-col gap-1">
+                <span className="flex items-center gap-2 text-[15px] font-semibold text-[hsl(var(--foreground))]"><Phone size={16} className="text-[hsl(var(--muted-foreground))]" /> {contact}</span>
+                <span className="flex items-center gap-1 text-[11px] text-[hsl(var(--primary))] font-medium"><Check size={12} /> Verified from official source</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
 }
 
-function EvidenceCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+function ComplaintCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+  if (isLoading) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
+        <p className="mt-4 flex items-center gap-2 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]"><LoaderCircle size={16} className="animate-spin" /> Generating complaint draft…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
+        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">Could not generate a complaint due to an error.</p>
+      </div>
+    );
+  }
+
+  if (!result?.generated_complaint) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
+        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">The AI-generated complaint will appear here.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-4" data-testid="result-evidence">
-      <div className="flex items-center gap-2 text-[hsl(var(--accent))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
-      {isLoading ? (
-        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">Collecting supporting sources…</p>
-      ) : error ? (
-        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">No sources available because the web lookup failed.</p>
-      ) : result?.supporting_sources?.length ? (
-        <div className="mt-3 max-h-52 space-y-3 overflow-y-auto pr-1">
-          {result.supporting_sources.map((source) => (
-            <div key={source.url} className="border-b border-[rgba(250,248,242,0.1)] pb-3 last:border-0 last:pb-0">
-              <a href={source.url} target="_blank" rel="noreferrer" className="flex items-start justify-between gap-2 text-[11px] font-bold leading-4 text-[hsl(var(--accent))] hover:underline">
-                <span>{source.title || 'Untitled source'}</span><ExternalLink size={12} className="mt-0.5 shrink-0" />
-              </a>
-              <p className="mt-1 text-[10px] leading-4 text-[rgba(250,248,242,0.55)]">{source.snippet || 'No snippet was returned.'}</p>
-              <p className="mt-1 break-all text-[9px] leading-3 text-[rgba(250,248,242,0.35)]">{source.url}</p>
-            </div>
-          ))}
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]" data-testid="result-complaint">
+      <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
+      <div className="mt-4 rounded-xl bg-[hsl(var(--muted))] p-4">
+        <p className="whitespace-pre-wrap text-[13px] leading-6 text-[hsl(var(--foreground))] font-mono">{result.generated_complaint}</p>
+      </div>
+    </div>
+  );
+}
+
+function EvidenceCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+  if (isLoading) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
+        <p className="mt-4 flex items-center gap-2 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]"><LoaderCircle size={16} className="animate-spin" /> Collecting supporting sources…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
+        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">No sources available because the web lookup failed.</p>
+      </div>
+    );
+  }
+
+  if (!result?.supporting_sources?.length) {
+    return (
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
+        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">No supporting sources were returned.</p>
+      </div>
+    );
+  }
+
+  const officials = result.supporting_sources.filter(s => s.url.includes('.gov') || s.url.includes('nic.in') || s.url.includes('municipal'));
+  const socials = result.supporting_sources.filter(s => s.url.includes('facebook.com') || s.url.includes('twitter.com') || s.url.includes('x.com') || s.url.includes('instagram.com'));
+  const supporting = result.supporting_sources.filter(s => !officials.includes(s) && !socials.includes(s));
+
+  const renderSourceList = (sources: typeof result.supporting_sources, label: string, icon: ReactNode, desc: string) => {
+    if (sources.length === 0) return null;
+    return (
+      <div className="mb-6 last:mb-0">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-1 flex items-center gap-1.5">{label}</p>
+        <p className="text-[11px] text-[hsl(var(--primary))] font-medium mb-3 flex items-center gap-1">{icon} {desc}</p>
+        <div className="space-y-4">
+          {sources.map((source) => {
+            const domain = new URL(source.url).hostname.replace('www.', '');
+            return (
+              <div key={source.url} className="group relative">
+                <a href={source.url} target="_blank" rel="noreferrer" className="block outline-none">
+                  <p className="text-[13px] font-bold leading-5 text-[hsl(var(--primary))] group-hover:underline">{source.title || 'Untitled source'}</p>
+                  <p className="mt-1 text-[12px] leading-5 text-[hsl(var(--foreground))] line-clamp-2">{source.snippet || 'No snippet was returned.'}</p>
+                  <p className="mt-1 flex items-center gap-1 text-[10px] text-[hsl(var(--muted-foreground))]"><ExternalLink size={10} /> {domain}</p>
+                </a>
+              </div>
+            );
+          })}
         </div>
-      ) : (
-        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">No supporting sources were returned.</p>
-      )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)] text-[hsl(var(--foreground))]" data-testid="result-evidence">
+      <div className="flex items-center gap-2 text-[hsl(var(--primary))] mb-5"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
+      
+      <div className="max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+        {renderSourceList(officials, 'Official', <Check size={12} />, 'Government source')}
+        {renderSourceList(supporting, 'Supporting', <span className="text-[16px] leading-none">•</span>, 'Reputable source')}
+        {renderSourceList(socials, 'Social', <span className="text-[16px] leading-none">•</span>, 'Supporting evidence only')}
+      </div>
     </div>
   );
 }

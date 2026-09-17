@@ -68,6 +68,15 @@ export interface ErrorResponse {
   error: string;
 }
 
+export type FindAuthorityInputLocationSource = typeof FindAuthorityInputLocationSource[keyof typeof FindAuthorityInputLocationSource];
+
+
+export const FindAuthorityInputLocationSource = {
+  GPS: 'GPS',
+  User_provided: 'User provided',
+  '': '',
+} as const;
+
 export interface FindAuthorityInput {
   /**
      * @minLength 1
@@ -79,6 +88,11 @@ export interface FindAuthorityInput {
      * @maxLength 240
      */
   location: string;
+  /** @maxLength 240 */
+  exact_location?: string;
+  location_source?: FindAuthorityInputLocationSource;
+  severity: string;
+  potential_hazard: string;
 }
 
 export interface SupportingSource {
@@ -87,21 +101,23 @@ export interface SupportingSource {
   snippet: string;
 }
 
-export type FindAuthorityResultConfidence = typeof FindAuthorityResultConfidence[keyof typeof FindAuthorityResultConfidence];
+export type FindAuthorityResultAuthorityConfidence = typeof FindAuthorityResultAuthorityConfidence[keyof typeof FindAuthorityResultAuthorityConfidence];
 
 
-export const FindAuthorityResultConfidence = {
+export const FindAuthorityResultAuthorityConfidence = {
   high: 'high',
   medium: 'medium',
   low: 'low',
 } as const;
 
 export interface FindAuthorityResult {
-  likely_authority: string;
-  confidence: FindAuthorityResultConfidence;
-  explanation: string;
-  official_reporting_url: string;
+  authority_name: string;
+  authority_type: string;
+  authority_reason: string;
+  authority_confidence: FindAuthorityResultAuthorityConfidence;
+  official_source_url: string;
   contact_information: string;
+  generated_complaint: string;
   supporting_sources: SupportingSource[];
 }
 
