@@ -44,3 +44,32 @@ export const AnalyzeProblemResponse = zod.object({
 })
 
 
+/**
+ * Searches public web results for official authority and complaint-channel evidence.
+ * @summary Find a likely civic reporting authority
+ */
+export const findAuthorityBodyIssueTypeMax = 120;
+
+export const findAuthorityBodyLocationMax = 240;
+
+
+
+export const FindAuthorityBody = zod.object({
+  "issue_type": zod.string().min(1).max(findAuthorityBodyIssueTypeMax),
+  "location": zod.string().min(1).max(findAuthorityBodyLocationMax)
+})
+
+export const FindAuthorityResponse = zod.object({
+  "likely_authority": zod.string(),
+  "confidence": zod.enum(['high', 'medium', 'low']),
+  "explanation": zod.string(),
+  "official_reporting_url": zod.string(),
+  "contact_information": zod.string(),
+  "supporting_sources": zod.array(zod.object({
+  "title": zod.string(),
+  "url": zod.string().url(),
+  "snippet": zod.string()
+}))
+})
+
+

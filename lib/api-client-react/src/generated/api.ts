@@ -23,6 +23,8 @@ import type {
   AnalyzeProblemInput,
   AnalyzeProblemResult,
   ErrorResponse,
+  FindAuthorityInput,
+  FindAuthorityResult,
   HealthStatus
 } from './api.schemas';
 
@@ -218,5 +220,94 @@ export const useAnalyzeProblem = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getAnalyzeProblemMutationOptions(options));
+    }
+
+export const getFindAuthorityUrl = () => {
+
+
+
+
+  return `/api/find-authority`
+}
+
+/**
+ * Searches public web results for official authority and complaint-channel evidence.
+ * @summary Find a likely civic reporting authority
+ */
+export const findAuthority = async (findAuthorityInput: FindAuthorityInput, options?: Parameters<typeof customFetch>[1]): Promise<FindAuthorityResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FindAuthorityResult>(getFindAuthorityUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(findAuthorityInput)
+  }
+);}
+
+
+
+
+
+export const getFindAuthorityMutationKey = () => ['findAuthority'] as const;
+
+export const getFindAuthorityMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof findAuthority>>, TError,FindAuthorityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof findAuthority>>, TError,FindAuthorityMutationVariables, TContext> => {
+
+const mutationKey = getFindAuthorityMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof findAuthority>>, FindAuthorityMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  findAuthority(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FindAuthorityMutationResult = NonNullable<Awaited<ReturnType<typeof findAuthority>>>
+    export type FindAuthorityMutationBody = BodyType<FindAuthorityInput>
+    export type FindAuthorityMutationError = ErrorType<ErrorResponse>
+    export type FindAuthorityMutationVariables = {data: BodyType<FindAuthorityInput>}
+
+    /**
+ * @summary Find a likely civic reporting authority
+ */
+export const useFindAuthority = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof findAuthority>>, TError,FindAuthorityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof findAuthority>>,
+        TError,
+        FindAuthorityMutationVariables,
+        TContext
+      > => {
+      return useMutation(getFindAuthorityMutationOptions(options));
     }
 

@@ -12,4 +12,8 @@ export * from './analyzeProblemResult';
 export * from './analyzeProblemResultIssueType';
 export * from './analyzeProblemResultSeverity';
 export * from './errorResponse';
+export * from './findAuthorityInput';
+export * from './findAuthorityResult';
+export * from './findAuthorityResultConfidence';
 export * from './healthStatus';
+export * from './supportingSource';

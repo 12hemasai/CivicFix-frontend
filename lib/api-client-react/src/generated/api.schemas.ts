@@ -68,3 +68,40 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface FindAuthorityInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  issue_type: string;
+  /**
+     * @minLength 1
+     * @maxLength 240
+     */
+  location: string;
+}
+
+export interface SupportingSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export type FindAuthorityResultConfidence = typeof FindAuthorityResultConfidence[keyof typeof FindAuthorityResultConfidence];
+
+
+export const FindAuthorityResultConfidence = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface FindAuthorityResult {
+  likely_authority: string;
+  confidence: FindAuthorityResultConfidence;
+  explanation: string;
+  official_reporting_url: string;
+  contact_information: string;
+  supporting_sources: SupportingSource[];
+}
+

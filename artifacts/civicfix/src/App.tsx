@@ -12,6 +12,7 @@ import {
   CircleAlert,
   ClipboardCheck,
   CloudUpload,
+  ExternalLink,
   FileImage,
   LoaderCircle,
   MapPin,
@@ -35,6 +36,21 @@ type AnalysisResult = {
   description: string;
   potential_hazard: string;
   visual_confidence: number;
+};
+
+type AuthoritySource = {
+  title: string;
+  url: string;
+  snippet: string;
+};
+
+type AuthorityResult = {
+  likely_authority: string;
+  confidence: 'high' | 'medium' | 'low';
+  explanation: string;
+  official_reporting_url: string;
+  contact_information: string;
+  supporting_sources: AuthoritySource[];
 };
 
 function readFileAsBase64(nextFile: File): Promise<string> {
@@ -62,6 +78,9 @@ function Home() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasResult, setHasResult] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [authorityResult, setAuthorityResult] = useState<AuthorityResult | null>(null);
+  const [isFindingAuthority, setIsFindingAuthority] = useState(false);
+  const [authorityError, setAuthorityError] = useState('');
   const [error, setError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -80,6 +99,8 @@ function Home() {
     setError('');
     setHasResult(false);
     setAnalysis(null);
+    setAuthorityResult(null);
+    setAuthorityError('');
     const accepted = ['image/jpeg', 'image/png', 'image/webp'];
     if (!accepted.includes(nextFile.type)) {
       setError('Please choose a JPG, PNG, or WebP image.');
@@ -107,7 +128,30 @@ function Home() {
     setFile(null);
     setHasResult(false);
     setAnalysis(null);
+    setAuthorityResult(null);
+    setAuthorityError('');
     setError('');
+  };
+
+  const findAuthority = async (issueType: string, confirmedLocation: string) => {
+    setIsFindingAuthority(true);
+    setAuthorityError('');
+    try {
+      const response = await fetch('/api/find-authority', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue_type: issueType, location: confirmedLocation }),
+      });
+      const payload = (await response.json()) as AuthorityResult | { error?: string };
+      if (!response.ok) {
+        throw new Error('error' in payload && payload.error ? payload.error : 'Web intelligence is temporarily unavailable.');
+      }
+      setAuthorityResult(payload as AuthorityResult);
+    } catch (authorityLookupError) {
+      setAuthorityError(authorityLookupError instanceof Error ? authorityLookupError.message : 'Web intelligence is temporarily unavailable.');
+    } finally {
+      setIsFindingAuthority(false);
+    }
   };
 
   const analyzeProblem = async () => {
@@ -123,6 +167,8 @@ function Home() {
     setError('');
     setHasResult(false);
     setAnalysis(null);
+    setAuthorityResult(null);
+    setAuthorityError('');
     setIsAnalyzing(true);
     try {
       const imageBase64 = await readFileAsBase64(file);
@@ -135,9 +181,11 @@ function Home() {
       if (!response.ok) {
         throw new Error('error' in payload && payload.error ? payload.error : 'Image analysis failed. Please try again.');
       }
-      setAnalysis(payload as AnalysisResult);
+      const analysisResult = payload as AnalysisResult;
+      setAnalysis(analysisResult);
       setIsAnalyzing(false);
       setHasResult(true);
+      void findAuthority(analysisResult.issue_type, location.trim());
       window.setTimeout(() => document.getElementById('analysis-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     } catch (analysisError) {
       setIsAnalyzing(false);
@@ -263,6 +311,7 @@ function Home() {
                   <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[hsl(var(--accent))]"><Check size={15} /> 02 / Your starting point</div>
                    <h2 className="mt-5 text-[32px] font-bold leading-[0.98] tracking-[-0.05em] sm:text-[42px]">Here’s what we found.</h2>
                    <p className="mt-4 max-w-sm text-[13px] leading-6 text-[rgba(250,248,242,0.68)]">This AI analysis is based only on what is visibly supported by your image. It is an estimate, not an official classification.</p>
+                   <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.12em] text-[hsl(var(--accent))]">Web intelligence powered by SerpApi</p>
                   <div className="mt-7 flex items-center gap-3 rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--accent))] text-[hsl(var(--secondary))]"><FileImage size={19} /></div>
                      <div className="min-w-0"><p className="truncate text-[12px] font-bold" data-testid="text-result-file">{file?.name}</p><p className="text-[11px] text-[rgba(250,248,242,0.58)]">Photo reviewed by CivicFix AI</p></div>
@@ -278,8 +327,8 @@ function Home() {
                     <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">DESCRIPTION</p><p className="mt-3 max-w-2xl text-[15px] leading-7" data-testid="result-description">{analysis?.description}</p></div>
                     <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5 sm:col-span-2"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">VISUAL CONFIDENCE</p><p className="mt-3 text-[24px] font-bold" data-testid="result-visual-confidence">{analysis?.visual_confidence}%</p><div className="mt-3 h-2 overflow-hidden rounded-full bg-[rgba(250,248,242,0.14)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-[width] duration-500" style={{ width: `${analysis?.visual_confidence ?? 0}%` }} /></div></div>
                   <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
-                     <PlaceholderCard icon={<ShieldCheck size={18} />} title="LIKELY AUTHORITY" copy="Waiting for web intelligence..." testId="result-authority" />
-                     <PlaceholderCard icon={<ClipboardCheck size={18} />} title="EVIDENCE" copy="Web evidence will appear here." testId="result-evidence" />
+                      <AuthorityCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
+                      <EvidenceCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
                      <PlaceholderCard icon={<ArrowDownRight size={18} />} title="COMPLAINT" copy="The AI-generated complaint will appear here." testId="result-complaint" />
                   </div>
                 </div>
@@ -328,6 +377,60 @@ function Home() {
         </footer>
       </div>
     </main>
+  );
+}
+
+function AuthorityCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+  return (
+    <div className="rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-4" data-testid="result-authority">
+      <div className="flex items-center gap-2 text-[hsl(var(--accent))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">LIKELY AUTHORITY</p></div>
+      {isLoading ? (
+        <p className="mt-3 flex items-center gap-2 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]"><LoaderCircle size={14} className="animate-spin" /> Checking official sources…</p>
+      ) : error ? (
+        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">{error}</p>
+      ) : result ? (
+        <>
+          <p className="mt-3 text-[16px] font-bold leading-5" data-testid="result-authority-name">{result.likely_authority || 'Authority not available'}</p>
+          <span className="mt-3 inline-flex rounded-full border border-[rgba(250,248,242,0.16)] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] text-[hsl(var(--accent))]" data-testid="result-authority-confidence">{result.confidence || 'low'} confidence</span>
+          <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]" data-testid="result-authority-reason">{result.explanation || 'No reason was returned.'}</p>
+          {result.official_reporting_url ? (
+            <a href={result.official_reporting_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-[hsl(var(--accent))] hover:underline" data-testid="result-complaint-url">Official reporting channel <ExternalLink size={12} /></a>
+          ) : (
+            <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.45)]">No official complaint URL found.</p>
+          )}
+          <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]" data-testid="result-contact-information">{result.contact_information || 'No official contact information was found.'}</p>
+        </>
+      ) : (
+        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">Waiting for web intelligence…</p>
+      )}
+    </div>
+  );
+}
+
+function EvidenceCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+  return (
+    <div className="rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-4" data-testid="result-evidence">
+      <div className="flex items-center gap-2 text-[hsl(var(--accent))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
+      {isLoading ? (
+        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">Collecting supporting sources…</p>
+      ) : error ? (
+        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">No sources available because the web lookup failed.</p>
+      ) : result?.supporting_sources?.length ? (
+        <div className="mt-3 max-h-52 space-y-3 overflow-y-auto pr-1">
+          {result.supporting_sources.map((source) => (
+            <div key={source.url} className="border-b border-[rgba(250,248,242,0.1)] pb-3 last:border-0 last:pb-0">
+              <a href={source.url} target="_blank" rel="noreferrer" className="flex items-start justify-between gap-2 text-[11px] font-bold leading-4 text-[hsl(var(--accent))] hover:underline">
+                <span>{source.title || 'Untitled source'}</span><ExternalLink size={12} className="mt-0.5 shrink-0" />
+              </a>
+              <p className="mt-1 text-[10px] leading-4 text-[rgba(250,248,242,0.55)]">{source.snippet || 'No snippet was returned.'}</p>
+              <p className="mt-1 break-all text-[9px] leading-3 text-[rgba(250,248,242,0.35)]">{source.url}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">No supporting sources were returned.</p>
+      )}
+    </div>
   );
 }
 

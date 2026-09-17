@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: analysis
     description: Civic problem image analysis
+  - name: authority
+    description: Web intelligence for likely civic authorities
 paths:
   /healthz:
     get:
@@ -59,6 +61,37 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Analysis service is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /find-authority:
+    post:
+      operationId: findAuthority
+      tags: [authority]
+      summary: Find a likely civic reporting authority
+      description: Searches public web results for official authority and complaint-channel evidence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FindAuthorityInput"
+      responses:
+        "200":
+          description: Authority search result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindAuthorityResult"
+        "400":
+          description: Invalid authority search input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Authority search is unavailable
           content:
             application/json:
               schema:
@@ -125,4 +158,57 @@ components:
           type: string
       required:
         - error
+    FindAuthorityInput:
+      type: object
+      properties:
+        issue_type:
+          type: string
+          minLength: 1
+          maxLength: 120
+        location:
+          type: string
+          minLength: 1
+          maxLength: 240
+      required:
+        - issue_type
+        - location
+    SupportingSource:
+      type: object
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+          format: uri
+        snippet:
+          type: string
+      required:
+        - title
+        - url
+        - snippet
+    FindAuthorityResult:
+      type: object
+      properties:
+        likely_authority:
+          type: string
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        explanation:
+          type: string
+        official_reporting_url:
+          type: string
+        contact_information:
+          type: string
+        supporting_sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupportingSource"
+      required:
+        - likely_authority
+        - confidence
+        - explanation
+        - official_reporting_url
+        - contact_information
+        - supporting_sources
 
