@@ -52,7 +52,10 @@ type LensEvidence = {
   titles: string[];
   snippets: string[];
   urls: string[];
+  sources: string[];
   text: string;
+  totalMatches: number;
+  hasExactMatches: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,8 +79,18 @@ function hasImageSignature(buffer: Buffer, mimeType: string): boolean {
   );
 }
 
-function uniqueStrings(values: string[], limit = 8): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, limit);
+function uniqueStrings(values: string[], limit?: number): string[] {
+  const unique = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  return typeof limit === "number" ? unique.slice(0, limit) : unique;
+}
+
+function extractUrlWords(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return decodeURIComponent(parsed.pathname).replace(/[-_./?=&%0-9]+/g, " ");
+  } catch {
+    return "";
+  }
 }
 
 function addResultFields(value: unknown, evidence: LensEvidence): void {
@@ -87,83 +100,246 @@ function addResultFields(value: unknown, evidence: LensEvidence): void {
   if (typeof value.snippet === "string") evidence.snippets.push(value.snippet);
   if (typeof value.description === "string") evidence.snippets.push(value.description);
   if (typeof value.text === "string") evidence.snippets.push(value.text);
+  if (typeof value.source === "string") evidence.sources.push(value.source);
   if (typeof value.link === "string" && /^https?:\/\//i.test(value.link)) evidence.urls.push(value.link);
   if (typeof value.url === "string" && /^https?:\/\//i.test(value.url)) evidence.urls.push(value.url);
 }
 
 function getLensEvidence(payload: unknown): LensEvidence {
-  const evidence: LensEvidence = { titles: [], snippets: [], urls: [], text: "" };
+  const evidence: LensEvidence = {
+    titles: [],
+    snippets: [],
+    urls: [],
+    sources: [],
+    text: "",
+    totalMatches: 0,
+    hasExactMatches: false,
+  };
   if (!isRecord(payload)) return evidence;
 
   addResultFields(payload.knowledge_graph, evidence);
   addResultFields(payload.search_information, evidence);
+  addResultFields(payload.search_parameters, evidence);
+  addResultFields(payload.ai_overview, evidence);
+  addResultFields(payload.reverse_image_search, evidence);
 
-  for (const key of ["visual_matches", "exact_matches", "related_content", "text_results", "image_results"]) {
+  if (Array.isArray(payload.exact_matches) && payload.exact_matches.length > 0) {
+    evidence.hasExactMatches = true;
+    for (const value of payload.exact_matches) addResultFields(value, evidence);
+  }
+
+  for (const key of ["visual_matches", "related_content", "text_results", "image_results", "organic_results"]) {
     const values = payload[key];
     if (!Array.isArray(values)) continue;
+    if (key === "visual_matches") {
+      evidence.totalMatches += values.length;
+    }
     for (const value of values) addResultFields(value, evidence);
   }
 
   evidence.titles = uniqueStrings(evidence.titles);
   evidence.snippets = uniqueStrings(evidence.snippets);
   evidence.urls = uniqueStrings(evidence.urls);
-  evidence.text = [...evidence.titles, ...evidence.snippets].join(" ").toLowerCase();
+  evidence.sources = uniqueStrings(evidence.sources);
+
+  const urlWords = evidence.urls.map(extractUrlWords).join(" ");
+  evidence.text = [
+    ...evidence.titles,
+    ...evidence.snippets,
+    ...evidence.sources,
+    urlWords,
+  ]
+    .join(" ")
+    .toLowerCase();
+
   return evidence;
 }
 
 function classifyLensEvidence(evidence: LensEvidence) {
   const candidates = [
     {
-      issue_type: "pothole",
-      terms: ["pothole", "road crater", "road hole", "pavement hole"],
+      issue_type: "pothole" as const,
+      primaryTerms: [
+        "pothole",
+        "potholes",
+        "pot hole",
+        "pot holes",
+        "pot-hole",
+        "pot-holes",
+        "road crater",
+        "road hole",
+        "road holes",
+        "pavement hole",
+        "street hole",
+        "hole in the road",
+        "hole in road",
+        "hole in street",
+        "asphalt hole",
+        "pothole repair",
+        "pothole patch",
+        "pothole damage",
+        "pothole claims",
+      ],
+      secondaryTerms: [
+        "road damage",
+        "damaged road",
+        "pavement damage",
+        "damaged pavement",
+        "road crack",
+        "road cracks",
+        "pavement crack",
+        "pavement cracks",
+        "cracked asphalt",
+        "cracked road",
+        "asphalt damage",
+        "asphalt crack",
+        "asphalt cracking",
+        "broken pavement",
+        "broken road",
+        "alligator cracking",
+        "road depression",
+        "street damage",
+        "sinkhole",
+        "road cavity",
+        "depression in road",
+        "uneven road",
+      ],
       hazard: "A road depression or hole may create a collision, trip, or vehicle-damage risk.",
     },
     {
-      issue_type: "damaged road",
-      terms: ["damaged road", "road damage", "cracked asphalt", "broken pavement", "road surface"],
+      issue_type: "damaged road" as const,
+      primaryTerms: [
+        "damaged road",
+        "road damage",
+        "cracked asphalt",
+        "broken pavement",
+        "road crack",
+        "road cracks",
+        "alligator cracking",
+        "road surface damage",
+        "broken road",
+        "cracked pavement",
+        "asphalt damage",
+        "pavement damage",
+        "road defect",
+      ],
+      secondaryTerms: ["asphalt", "tarmac", "pavement", "street surface", "road repair", "macadam"],
       hazard: "Visible road-surface damage may create a travel or vehicle-safety risk.",
     },
     {
-      issue_type: "broken streetlight",
-      terms: ["streetlight", "street light", "lamp post", "lamppost", "light pole"],
-      hazard: "A non-functioning streetlight may reduce visibility and nighttime safety.",
-    },
-    {
-      issue_type: "overflowing garbage bin",
-      terms: ["overflowing bin", "overflowing garbage", "full garbage bin"],
-      hazard: "Overflowing waste may create sanitation, odor, and obstruction risks.",
-    },
-    {
-      issue_type: "garbage accumulation",
-      terms: ["garbage", "trash", "litter", "waste pile", "rubbish"],
-      hazard: "Accumulated waste may create sanitation, odor, and obstruction risks.",
-    },
-    {
-      issue_type: "blocked drain",
-      terms: ["blocked drain", "clogged drain", "storm drain", "gutter", "sewer"],
-      hazard: "A blocked drain may increase localized flooding or water-safety risk.",
-    },
-    {
-      issue_type: "damaged sidewalk",
-      terms: ["damaged sidewalk", "broken sidewalk", "broken footpath", "damaged pavement"],
+      issue_type: "damaged sidewalk" as const,
+      primaryTerms: [
+        "damaged sidewalk",
+        "broken sidewalk",
+        "broken footpath",
+        "damaged pavement",
+        "cracked sidewalk",
+        "sidewalk crack",
+        "footpath damage",
+        "damaged walkway",
+        "pavement trip hazard",
+        "uneven sidewalk",
+        "broken curb",
+        "broken kerb",
+      ],
+      secondaryTerms: ["sidewalk", "footpath", "walkway", "curb", "kerb"],
       hazard: "Damaged pedestrian surfaces may create a trip or accessibility risk.",
     },
     {
-      issue_type: "fallen/obstructing object",
-      terms: ["fallen tree", "fallen object", "obstruction", "debris", "blocked road"],
+      issue_type: "broken streetlight" as const,
+      primaryTerms: [
+        "broken streetlight",
+        "streetlight",
+        "street light",
+        "streetlights",
+        "lamp post",
+        "lamppost",
+        "light pole",
+        "street lamp",
+        "broken lamp",
+        "faulty streetlight",
+      ],
+      secondaryTerms: ["light fixture", "illumination pole"],
+      hazard: "A non-functioning streetlight may reduce visibility and nighttime safety.",
+    },
+    {
+      issue_type: "overflowing garbage bin" as const,
+      primaryTerms: [
+        "overflowing bin",
+        "overflowing garbage",
+        "overflowing trash",
+        "full garbage bin",
+        "dumpster overflow",
+        "overflowing waste",
+      ],
+      secondaryTerms: ["dumpster", "trash can", "garbage can", "rubbish bin"],
+      hazard: "Overflowing waste may create sanitation, odor, and obstruction risks.",
+    },
+    {
+      issue_type: "garbage accumulation" as const,
+      primaryTerms: [
+        "garbage accumulation",
+        "garbage pile",
+        "trash pile",
+        "waste pile",
+        "litter",
+        "rubbish",
+        "dumped trash",
+        "illegal dumping",
+        "accumulated waste",
+        "refuse pile",
+        "garbage dump",
+      ],
+      secondaryTerms: ["garbage", "trash", "waste", "rubbish", "dumping", "refuse"],
+      hazard: "Accumulated waste may create sanitation, odor, and obstruction risks.",
+    },
+    {
+      issue_type: "blocked drain" as const,
+      primaryTerms: [
+        "blocked drain",
+        "clogged drain",
+        "storm drain",
+        "blocked sewer",
+        "clogged sewer",
+        "drain blockage",
+        "waterlogging",
+        "street flooding",
+        "blocked catch basin",
+      ],
+      secondaryTerms: ["storm drain", "catch basin", "culvert", "manhole", "sewer", "drainage"],
+      hazard: "A blocked drain may increase localized flooding or water-safety risk.",
+    },
+    {
+      issue_type: "fallen/obstructing object" as const,
+      primaryTerms: [
+        "fallen tree",
+        "fallen branch",
+        "fallen object",
+        "obstruction",
+        "road obstruction",
+        "debris on road",
+        "fallen pole",
+        "fallen wire",
+      ],
+      secondaryTerms: ["branch", "tree trunk", "barrier", "obstruction", "debris"],
       hazard: "An obstruction may create a collision, access, or pedestrian-safety risk.",
     },
   ] as const;
 
   const scores = candidates
-    .map((candidate) => ({
-      candidate,
-      score: candidate.terms.reduce(
-        (score, term) => score + (evidence.text.includes(term) ? 1 : 0),
-        0,
-      ),
-    }))
+    .map((candidate) => {
+      const primaryMatches = candidate.primaryTerms.filter((term) => evidence.text.includes(term));
+      const secondaryMatches = candidate.secondaryTerms.filter((term) => evidence.text.includes(term));
+      const score = primaryMatches.length * 3 + secondaryMatches.length;
+      return {
+        candidate,
+        primaryCount: primaryMatches.length,
+        secondaryCount: secondaryMatches.length,
+        score,
+      };
+    })
     .sort((left, right) => right.score - left.score);
+
   const best = scores[0];
 
   if (!best || best.score === 0) {
@@ -177,13 +353,29 @@ function classifyLensEvidence(evidence: LensEvidence) {
     };
   }
 
-  const visualConfidence = Math.min(90, best.score >= 2 ? 70 : 45);
+  // Visual confidence represents Lens optical pattern similarity, decoupled from issue identification.
+  // Low visual confidence (e.g. 15%-45%) denotes limited visual-search matches, not an uncertain issue.
+  let visualConfidence = 15;
+  if (evidence.hasExactMatches) {
+    visualConfidence = 75;
+  } else if (evidence.totalMatches >= 10 && best.primaryCount >= 2) {
+    visualConfidence = 55;
+  } else if (evidence.totalMatches >= 3 && (best.primaryCount >= 1 || best.secondaryCount >= 2)) {
+    visualConfidence = 45;
+  } else if (best.score > 0) {
+    visualConfidence = 15;
+  }
+
+  // Keep severity conservative. If visual confidence is low, severity is conservative ('low'),
+  // which causes the client UI to display 'Needs manual assessment'.
   const supportingEvidence = uniqueStrings([...evidence.titles, ...evidence.snippets], 3).join(" · ");
+  const evidenceDetails = supportingEvidence ? ` Evidence: ${supportingEvidence}` : "";
+
   return {
     issue_type: best.candidate.issue_type,
-    severity: (visualConfidence >= 65 ? "medium" : "low") as (typeof SEVERITIES)[number],
-    description: `Google Lens evidence suggests ${best.candidate.issue_type}. This is based on visual matches and returned text, not a definitive civic classification.${supportingEvidence ? ` Evidence: ${supportingEvidence}` : ""}`,
-    potential_hazard: visualConfidence >= 65 ? best.candidate.hazard : "Needs manual assessment because Lens evidence is limited.",
+    severity: "low" as (typeof SEVERITIES)[number],
+    description: `Google Lens visual-search evidence supports ${best.candidate.issue_type}. Lens/search-supported.${evidenceDetails}`,
+    potential_hazard: `${best.candidate.hazard} (Needs manual assessment to confirm on-site depth and hazard level).`,
     visual_confidence: visualConfidence,
   };
 }

@@ -2,9 +2,11 @@
   "name": "workspace",
   "version": "0.0.0",
   "license": "MIT",
+  "type": "module",
   "scripts": {
     "dev": "npm run build --workspace=@workspace/civicfix && npm run dev --workspace=@workspace/api-server",
-    "build": "npm run typecheck && npm run build --workspaces --if-present",
+    "start": "node server.ts",
+    "build": "npm run build --workspaces --if-present",
     "typecheck:libs": "tsc --build",
     "typecheck": "npm run typecheck:libs && npm run typecheck --workspaces --if-present"
   },

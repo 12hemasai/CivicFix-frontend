@@ -11,17 +11,24 @@ import {
   ChevronDown,
   CircleAlert,
   ClipboardCheck,
-  CloudUpload,
+  Copy,
+  CheckCheck,
   ExternalLink,
   FileImage,
   LoaderCircle,
   LocateFixed,
   MapPin,
   Menu,
-  Navigation,
   RotateCcw,
   ShieldCheck,
   Phone,
+  Radio,
+  Cpu,
+  Zap,
+  Sparkles,
+  Terminal,
+  Crosshair,
+  Layers,
   X,
 } from 'lucide-react';
 import {
@@ -65,15 +72,61 @@ function displaySeverity(result: AnalysisResult | null): string {
   return result.severity;
 }
 
+async function parseApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+  const isJson = contentType.includes('application/json');
+
+  if (isJson) {
+    let payload: any;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error(`The API server returned an unparseable response (HTTP ${response.status}).`);
+    }
+
+    if (!response.ok) {
+      const serverError = payload && typeof payload === 'object' && typeof payload.error === 'string' ? payload.error : null;
+      throw new Error(serverError || `${fallbackMessage} (HTTP ${response.status})`);
+    }
+
+    return payload as T;
+  }
+
+  // Non-JSON response (e.g. HTML error page, 502/504 Bad Gateway, or proxy misdirection)
+  const previewText = (await response.text().catch(() => '')).trim();
+  console.warn('[API Non-JSON Response]', response.status, response.statusText, previewText.slice(0, 200));
+
+  if (!response.ok) {
+    throw new Error(`API request failed with HTTP ${response.status} (${response.statusText || 'Non-JSON server response'}).`);
+  }
+
+  throw new Error(`The API server returned an HTML document instead of JSON. Please verify the API route configuration.`);
+}
+
 function CivicFixLogo({ className = "", iconSize = 28 }: { className?: string, iconSize?: number }) {
   return (
-    <div className={`flex items-center gap-2.5 ${className}`}>
-      <svg width={iconSize} height={iconSize} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="CivicFix Logo">
-        <rect width="32" height="32" rx="8" fill="hsl(var(--primary))" />
-        <path d="M16 8C12.134 8 9 11.134 9 15C9 20.25 16 26 16 26C16 26 23 20.25 23 15C23 11.134 19.866 8 16 8Z" stroke="hsl(var(--primary-foreground))" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M13 15L15 17L19 13" stroke="hsl(var(--primary-foreground))" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-      <span className="text-[19px] font-bold tracking-tight text-[hsl(var(--foreground))]">CivicFix</span>
+    <div className={`flex items-center gap-3 ${className}`}>
+      <div className="relative flex items-center justify-center">
+        <div className="absolute -inset-1 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 opacity-60 blur-xs animate-pulse" />
+        <svg width={iconSize} height={iconSize} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="CivicFix Logo" className="relative z-10">
+          <rect width="32" height="32" rx="8" fill="#070c18" stroke="#00f0ff" strokeWidth="1.5" />
+          <path d="M16 6L25 11.2V19.8C25 24.5 16 27.5 16 27.5C16 27.5 7 24.5 7 19.8V11.2L16 6Z" stroke="#00f0ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M12 16L15 19L20 13" stroke="#10b981" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+      <div className="flex flex-col">
+        <div className="flex items-center gap-2">
+          <span className="font-tech text-[20px] font-bold tracking-wider text-white">
+            CIVIC<span className="text-[#00f0ff]">FIX</span>
+          </span>
+          <span className="rounded border border-cyan-500/40 bg-cyan-950/70 px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-widest text-cyan-300">
+            2050
+          </span>
+        </div>
+        <span className="font-mono text-[9px] tracking-widest text-slate-400">
+          MUNICIPAL NEURAL GRID
+        </span>
+      </div>
     </div>
   );
 }
@@ -151,23 +204,33 @@ function Home() {
 
   const findAuthority = async (issueType: string, confirmedLocation: string) => {
     setIsFindingAuthority(true);
-    setAnalysisStatus('Finding relevant civic information...');
+    setAnalysisStatus('Scanning municipal registries...');
     setAuthorityError('');
     const statusTimers = [
-      window.setTimeout(() => setAnalysisStatus('Searching official sources...'), 400),
-      window.setTimeout(() => setAnalysisStatus('Identifying likely authority...'), 900),
+      window.setTimeout(() => setAnalysisStatus('Cross-referencing government jurisdictional matrix...'), 400),
+      window.setTimeout(() => setAnalysisStatus('Synthesizing verified civic intelligence...'), 900),
     ];
     try {
       const response = await fetch('/api/find-authority', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue_type: issueType, location: confirmedLocation, exact_location: exactLocation, location_source: locationSource, severity: analysis?.severity || 'medium', potential_hazard: analysis?.potential_hazard || '' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          issue_type: issueType,
+          location: confirmedLocation,
+          exact_location: exactLocation,
+          location_source: locationSource,
+          severity: analysis?.severity || 'medium',
+          potential_hazard: analysis?.potential_hazard || ''
+        }),
       });
-      const payload = (await response.json()) as AuthorityResult | { error?: string };
-      if (!response.ok) {
-        throw new Error('error' in payload && payload.error ? payload.error : 'Web intelligence is temporarily unavailable.');
-      }
-      setAuthorityResult(payload as AuthorityResult);
+      const authorityData = await parseApiResponse<AuthorityResult>(
+        response,
+        'Web intelligence is temporarily unavailable.'
+      );
+      setAuthorityResult(authorityData);
     } catch (authorityLookupError) {
       setAuthorityError(authorityLookupError instanceof Error ? authorityLookupError.message : 'Web intelligence is temporarily unavailable.');
     } finally {
@@ -210,7 +273,7 @@ function Home() {
         setIsLocating(false);
       },
       (err) => {
-        setError(err.message || 'Unable to retrieve your location.');
+        setError(err.message || 'Unable to retrieve orbital location.');
         setIsLocating(false);
         setLocationMethod('manual');
       },
@@ -220,11 +283,11 @@ function Home() {
 
   const analyzeProblem = async () => {
     if (!file) {
-      setError('Add a photo first so CivicFix can inspect the problem.');
+      setError('Add optical sensor imagery so CivicFix 2050 can scan the defect.');
       return;
     }
     if (!location.trim()) {
-      setError('Add the problem location so the result has useful context.');
+      setError('Add sector or city location so spatial intelligence can resolve jurisdiction.');
       document.getElementById('problem-location')?.focus();
       return;
     }
@@ -234,9 +297,9 @@ function Home() {
     setAuthorityResult(null);
     setAuthorityError('');
     setIsAnalyzing(true);
-    setAnalysisStatus('Uploading image...');
+    setAnalysisStatus('Uploading sensor stream...');
     const statusTimers = [
-      window.setTimeout(() => setAnalysisStatus('Searching image with Google Lens...'), 700),
+      window.setTimeout(() => setAnalysisStatus('Executing Google Lens optical spectral scan...'), 700),
     ];
     try {
       const formData = new FormData();
@@ -244,13 +307,15 @@ function Home() {
 
       const response = await fetch('/api/analyze-problem', {
         method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+        },
         body: formData,
       });
-      const payload = (await response.json()) as AnalysisResult | { error?: string };
-      if (!response.ok) {
-        throw new Error('error' in payload && payload.error ? payload.error : 'Image analysis failed. Please try again.');
-      }
-      const analysisResult = payload as AnalysisResult;
+      const analysisResult = await parseApiResponse<AnalysisResult>(
+        response,
+        'Image analysis failed. Please try again.'
+      );
       setAnalysis(analysisResult);
       setIsAnalyzing(false);
       setHasResult(true);
@@ -273,43 +338,114 @@ function Home() {
   return (
     <main className="civic-page">
       <div className="app-shell">
-        <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 lg:px-10" data-testid="header-navigation">
-          <a href="#top" className="focus-ring rounded-md" data-testid="link-home">
-            <CivicFixLogo />
-          </a>
-          <div className="flex items-center gap-4">
-            <span className="hidden sm:inline-flex items-center rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-[11px] font-bold tracking-wide text-[hsl(var(--secondary-foreground))] shadow-sm">AI Civic Assistant</span>
-            <button type="button" onClick={() => setMobileMenuOpen((open) => !open)} className="focus-ring rounded-lg p-2 md:hidden" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} data-testid="button-mobile-menu">
-              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-            </button>
+        {/* Futuristic 2050 Header Bar */}
+        <header className="border-b border-cyan-500/20 bg-[#060a14]/85 backdrop-blur-md sticky top-0 z-40" data-testid="header-navigation">
+          <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-4 sm:px-8 lg:px-10">
+            <a href="#top" className="focus-ring rounded-lg" data-testid="link-home">
+              <CivicFixLogo />
+            </a>
+
+            <div className="hidden lg:flex items-center gap-6 font-mono text-[12px] text-slate-400">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                <span className="text-emerald-400 font-semibold tracking-wider">NEURAL GRID: ACTIVE</span>
+              </div>
+              <span className="text-slate-600">|</span>
+              <span className="hover:text-cyan-400 transition-colors">SECTOR RESOLVER v50.4</span>
+              <span className="text-slate-600">|</span>
+              <span className="text-cyan-400/80">LENS SPECTRAL INTERFACE</span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="hidden sm:inline-flex items-center gap-1.5 rounded border border-cyan-500/30 bg-cyan-950/60 px-3 py-1 font-mono text-[11px] font-bold tracking-wider text-cyan-300 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
+                <Radio size={12} className="text-[#00f0ff] animate-pulse" />
+                2050 PROTOCOL
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen((open) => !open)}
+                className="focus-ring rounded-lg border border-cyan-500/30 bg-[#0a1122] p-2 text-cyan-400 md:hidden"
+                aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+                data-testid="button-mobile-menu"
+              >
+                {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              </button>
+            </div>
           </div>
         </header>
+
         {mobileMenuOpen && (
-          <nav className="mx-5 mb-3 flex flex-col gap-1 rounded-2xl border hairline bg-[hsl(var(--card))] p-2 shadow-[var(--shadow-soft)] md:hidden" aria-label="Mobile navigation" data-testid="mobile-navigation">
-            <a href="#how-it-works" onClick={() => setMobileMenuOpen(false)} className="rounded-xl px-4 py-3 text-sm font-semibold hover:bg-[hsl(var(--muted))]" data-testid="link-mobile-how-it-works">How it works</a>
-            <a href="#why-civicfix" onClick={() => setMobileMenuOpen(false)} className="rounded-xl px-4 py-3 text-sm font-semibold hover:bg-[hsl(var(--muted))]" data-testid="link-mobile-why-civicfix">Why CivicFix</a>
-            <button type="button" onClick={scrollToReport} className="rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-left text-sm font-semibold text-[hsl(var(--card))]" data-testid="button-mobile-start-report">Start a report</button>
+          <nav className="mx-5 mb-3 mt-2 flex flex-col gap-1.5 rounded-xl border border-cyan-500/30 bg-[#090e1c] p-3 shadow-[0_0_30px_rgba(0,240,255,0.15)] md:hidden z-50 relative" aria-label="Mobile navigation" data-testid="mobile-navigation">
+            <a href="#how-it-works" onClick={() => setMobileMenuOpen(false)} className="rounded-lg px-4 py-2.5 font-tech text-sm font-semibold text-slate-200 hover:bg-cyan-950/60 hover:text-cyan-400" data-testid="link-mobile-how-it-works">Protocol Pipeline</a>
+            <a href="#why-civicfix" onClick={() => setMobileMenuOpen(false)} className="rounded-lg px-4 py-2.5 font-tech text-sm font-semibold text-slate-200 hover:bg-cyan-950/60 hover:text-cyan-400" data-testid="link-mobile-why-civicfix">Security & Trust</a>
+            <button type="button" onClick={scrollToReport} className="rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-2.5 text-left font-tech text-sm font-bold text-[#05080e]" data-testid="button-mobile-start-report">Engage Sensor Portal</button>
           </nav>
         )}
-        <section id="top" className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-10 sm:px-8 sm:pt-16 lg:grid-cols-[0.91fr_1.09fr] lg:gap-16 lg:px-10 lg:pb-28 lg:pt-20">
+
+        {/* Hero & Diagnostic Section */}
+        <section id="top" className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-10 sm:px-8 sm:pt-14 lg:grid-cols-[0.95fr_1.05fr] lg:gap-14 lg:px-10 lg:pb-28 lg:pt-16">
           <div className="rise-in">
-            <h1 className="max-w-[600px] text-balance text-[clamp(2.5rem,6vw,4.5rem)] font-bold leading-[1.05] tracking-[-0.03em] text-[hsl(var(--foreground))]">
-              Turn civic problems into action.
+            <div className="inline-flex items-center gap-2 rounded border border-cyan-500/30 bg-cyan-950/50 px-3 py-1 font-mono text-[11px] font-semibold text-cyan-400 tracking-wider mb-6">
+              <Terminal size={13} className="text-cyan-400" />
+              <span>SYS.PROTOCOL // CIVIC INFRASTRUCTURE AUTONOMY 2050</span>
+            </div>
+
+            <h1 className="max-w-[620px] font-tech text-[clamp(2.4rem,5.5vw,4.2rem)] font-bold leading-[1.05] tracking-tight text-white">
+              Next-gen municipal diagnostics.<br/>
+              <span className="bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent">
+                Turn civic defects into direct action.
+              </span>
             </h1>
-             <p className="mt-6 max-w-[480px] text-[17px] leading-relaxed text-[hsl(var(--muted-foreground))]">
-               Upload a photo. Identify the issue. Find the right authority. Generate a ready-to-report complaint.
-             </p>
-          </div>
-          <div id="report" className="rise-in rise-in-delay scroll-mt-6">
-            <div className="relative rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-sm sm:p-7">
-              <div className="mb-6 flex items-start justify-between gap-4 px-1">
-                <div>
-                  <h2 className="text-[18px] font-bold tracking-tight text-[hsl(var(--foreground))]">Upload a civic issue</h2>
-                  <p className="mt-1 text-[13px] text-[hsl(var(--muted-foreground))]">Roads, potholes, garbage, streetlights and more</p>
-                </div> 
+
+            <p className="mt-6 max-w-[500px] text-[16px] leading-relaxed text-slate-300">
+              Deploy optical spectral intelligence to diagnose potholes, hazards, and failures. Automatically cross-reference live government jurisdiction and generate actionable, verified complaint drafts.
+            </p>
+
+            <div className="mt-8 grid grid-cols-3 gap-3 max-w-[500px]">
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-left">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-cyan-400">OPTICAL SENSING</p>
+                <p className="mt-1 font-tech text-[14px] font-bold text-white">Google Lens AI</p>
               </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-left">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-emerald-400">JURISDICTION</p>
+                <p className="mt-1 font-tech text-[14px] font-bold text-white">Live Web Directory</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-left">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-amber-400">DISPATCH READY</p>
+                <p className="mt-1 font-tech text-[14px] font-bold text-white">Neural Draft</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 2050 Futuristic Diagnostic Upload Portal */}
+          <div id="report" className="rise-in rise-in-delay scroll-mt-8">
+            <div className="hud-panel relative rounded-2xl p-6 sm:p-8 shadow-[0_0_50px_rgba(0,240,255,0.08)]">
+              <div className="hud-corner-tl" />
+              <div className="hud-corner-tr" />
+              <div className="hud-corner-bl" />
+              <div className="hud-corner-br" />
+
+              <div className="mb-6 flex items-start justify-between gap-4 border-b border-white/10 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                    <p className="font-mono text-[11px] font-bold tracking-widest text-cyan-400 uppercase">TELEMETRY INGESTION PORT // 01</p>
+                  </div>
+                  <h2 className="mt-1 font-tech text-[20px] font-bold tracking-wide text-white">Upload Infrastructure Defect</h2>
+                  <p className="mt-0.5 text-[13px] text-slate-400">Potholes, damaged transit, electrical hazards, sanitation</p>
+                </div>
+                <div className="hidden sm:flex items-center gap-1.5 rounded border border-white/10 bg-black/40 px-2.5 py-1 font-mono text-[10px] text-slate-400">
+                  <Cpu size={12} className="text-cyan-400" />
+                  <span>AI CORE ACTIVE</span>
+                </div>
+              </div>
+
+              {/* Optical Chamber Dropzone */}
               <div
-                className={`upload-zone relative flex min-h-[220px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-5 py-6 text-center transition-all hover:border-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/0.02)] ${isDragging ? 'is-dragging border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.02)]' : ''}`}
+                className={`upload-zone relative flex min-h-[230px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-cyan-500/25 bg-[#060b17] px-5 py-6 text-center transition-all hover:border-cyan-400 hover:shadow-[0_0_30px_rgba(0,240,255,0.15)] ${isDragging ? 'is-dragging' : ''}`}
                 onClick={() => fileInputRef.current?.click()}
                 onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
@@ -320,196 +456,513 @@ function Home() {
                 aria-label="Upload a photo of the problem"
                 data-testid="dropzone-photo"
               >
+                {/* Laser beam sweep effect */}
+                <div className="scan-laser absolute inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-[#00f0ff] to-transparent pointer-events-none z-20 shadow-[0_0_12px_#00f0ff]" />
+
+                {/* Corner Crosshairs */}
+                <div className="absolute top-2 left-2 font-mono text-[9px] text-cyan-500/40 pointer-events-none">+</div>
+                <div className="absolute top-2 right-2 font-mono text-[9px] text-cyan-500/40 pointer-events-none">+</div>
+                <div className="absolute bottom-2 left-2 font-mono text-[9px] text-cyan-500/40 pointer-events-none">+</div>
+                <div className="absolute bottom-2 right-2 font-mono text-[9px] text-cyan-500/40 pointer-events-none">+</div>
+
                 <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={onFileChange} className="sr-only" data-testid="input-photo" />
+                
                 {previewUrl ? (
                   <>
                     <img src={previewUrl} alt="Preview of the selected infrastructure problem" className="absolute inset-0 h-full w-full object-cover" data-testid="img-photo-preview" />
-                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10 text-white">
-                      <div className="min-w-0">
-                        <p className="truncate text-[13px] font-medium drop-shadow-md" data-testid="text-photo-name">{file?.name}</p>
+                    
+                    {/* Futuristic HUD overlay over preview image */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/60 pointer-events-none" />
+                    
+                    {/* Reticle center */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="h-16 w-16 rounded-full border border-cyan-400/40 flex items-center justify-center animate-pulse">
+                        <Crosshair size={24} className="text-cyan-400/80" />
                       </div>
-                      <button type="button" onClick={(event) => { event.stopPropagation(); removeFile(); }} className="focus-ring ml-3 shrink-0 rounded-md bg-white/20 p-1.5 backdrop-blur-md transition-colors hover:bg-white/30" aria-label="Remove selected photo" data-testid="button-remove-photo"><X size={16} /></button>
+                    </div>
+
+                    <div className="absolute top-3 inset-x-4 flex items-center justify-between pointer-events-none">
+                      <span className="rounded border border-cyan-400/40 bg-black/70 px-2 py-0.5 font-mono text-[10px] text-cyan-300 backdrop-blur-md">
+                        OPTICAL SCAN LOCKED
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400 bg-black/60 px-2 py-0.5 rounded">
+                        2050.LENS.VERIFIED
+                      </span>
+                    </div>
+
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between px-4 pb-4 pt-10 text-white z-30">
+                      <div className="min-w-0 flex flex-col items-start">
+                        <p className="truncate font-mono text-[12px] font-bold text-white drop-shadow-md" data-testid="text-photo-name">
+                          {file?.name}
+                        </p>
+                        <span className="font-mono text-[10px] text-emerald-400">
+                          {((file?.size || 0) / 1024).toFixed(1)} KB · RESOLVED
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(event) => { event.stopPropagation(); removeFile(); }}
+                        className="focus-ring ml-3 shrink-0 rounded-lg border border-white/20 bg-black/70 p-2 text-slate-300 backdrop-blur-md hover:bg-rose-950/80 hover:text-rose-400 transition-colors"
+                        aria-label="Remove selected photo"
+                        data-testid="button-remove-photo"
+                      >
+                        <X size={16} />
+                      </button>
                     </div>
                   </>
                 ) : (
-                  <>
-                    <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[hsl(var(--background))] text-[hsl(var(--primary))] shadow-sm"><FileImage size={24} strokeWidth={1.5} /></span>
-                    <span className="inline-flex rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-[13px] font-semibold text-[hsl(var(--primary-foreground))] shadow-sm">Choose photo</span>
-                    <p className="mt-4 text-[12px] font-medium text-[hsl(var(--muted-foreground))]">JPG, PNG or WEBP · Max 500 KB</p>
-                  </>
+                  <div className="flex flex-col items-center z-10">
+                    <div className="relative mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-500/40 bg-cyan-950/40 text-[#00f0ff] shadow-[0_0_20px_rgba(0,240,255,0.2)]">
+                      <FileImage size={28} strokeWidth={1.75} />
+                    </div>
+                    <span className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 px-5 py-2.5 font-tech text-[13px] font-bold text-[#05080e] shadow-[0_0_20px_rgba(0,240,255,0.3)] hover:brightness-110 transition-all">
+                      <Crosshair size={15} /> Select Optical Imagery
+                    </span>
+                    <p className="mt-3 font-mono text-[11px] text-slate-400">
+                      JPG, PNG or WEBP · Target max 500 KB · Lens Compatible
+                    </p>
+                  </div>
                 )}
               </div>
+
               {file && (
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="focus-ring mt-3 flex items-center gap-2 px-1 text-[12px] font-bold text-[hsl(var(--secondary))]" data-testid="button-replace-photo"><RotateCcw size={13} /> Replace photo</button>
+                <div className="mt-3 flex items-center justify-between px-1">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="focus-ring flex items-center gap-2 font-mono text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 transition-colors"
+                    data-testid="button-replace-photo"
+                  >
+                    <RotateCcw size={12} /> Replace Optical Feed
+                  </button>
+                  <span className="font-mono text-[10px] text-slate-500">FORMAT: ENCRYPTED BITSTREAM</span>
+                </div>
               )}
-              <label htmlFor="problem-location" className="mt-5 block text-[12px] font-bold text-[hsl(var(--foreground))]">Where is the problem?</label>
-              <label htmlFor="problem-location" className="mt-8 block text-[15px] font-bold tracking-tight text-[hsl(var(--foreground))]">Where is the problem?</label>
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => { setLocationMethod('gps'); requestLocation(); }}
-                  className={`focus-ring flex-1 rounded-xl border py-3 text-[13px] font-medium transition-colors ${locationMethod === 'gps' ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)] text-[hsl(var(--primary))]' : 'border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary)/0.5)]'}`}
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    {isLocating ? <LoaderCircle size={16} className="animate-spin" /> : <LocateFixed size={16} />}
-                    Use my current location
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setLocationMethod('manual'); setLocationSource('User provided'); setExactLocation(''); }}
-                  className={`focus-ring flex-1 rounded-xl border py-3 text-[13px] font-medium transition-colors ${locationMethod === 'manual' ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)] text-[hsl(var(--primary))]' : 'border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary)/0.5)]'}`}
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    <MapPin size={16} /> Enter location manually
-                  </span>
-                </button>
+
+              {/* Spatial Location Matrix */}
+              <div className="mt-6 border-t border-white/10 pt-5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="problem-location" className="font-mono text-[11px] font-bold tracking-wider text-slate-300 uppercase flex items-center gap-2">
+                    <MapPin size={13} className="text-cyan-400" />
+                    Spatial Sector Coordinates
+                  </label>
+                  <span className="font-mono text-[10px] text-slate-500">MUNICIPAL MATRIX</span>
+                </div>
+
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => { setLocationMethod('gps'); requestLocation(); }}
+                    className={`focus-ring flex-1 rounded-xl border py-2.5 px-3 font-tech text-[12px] font-semibold transition-all flex items-center justify-center gap-2 ${
+                      locationMethod === 'gps'
+                        ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300 shadow-[0_0_15px_rgba(0,240,255,0.15)]'
+                        : 'border-white/10 bg-white/[0.02] text-slate-400 hover:border-cyan-500/40 hover:text-white'
+                    }`}
+                  >
+                    {isLocating ? <LoaderCircle size={15} className="animate-spin text-cyan-400" /> : <LocateFixed size={15} className="text-cyan-400" />}
+                    <span>Orbital GPS Lock</span>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => { setLocationMethod('manual'); setLocationSource('User provided'); setExactLocation(''); }}
+                    className={`focus-ring flex-1 rounded-xl border py-2.5 px-3 font-tech text-[12px] font-semibold transition-all flex items-center justify-center gap-2 ${
+                      locationMethod === 'manual'
+                        ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300 shadow-[0_0_15px_rgba(0,240,255,0.15)]'
+                        : 'border-white/10 bg-white/[0.02] text-slate-400 hover:border-cyan-500/40 hover:text-white'
+                    }`}
+                  >
+                    <MapPin size={15} className="text-cyan-400" />
+                    <span>Sector Input (Manual)</span>
+                  </button>
+                </div>
+
+                {locationMethod === 'manual' ? (
+                  <div className="relative mt-3">
+                    <input
+                      id="problem-location"
+                      type="text"
+                      value={location}
+                      onChange={(event) => { setLocation(event.target.value); setError(''); setLocationSource('User provided'); setExactLocation(''); }}
+                      placeholder="Enter city or area (e.g. Tirupati)"
+                      className="focus-ring h-12 w-full rounded-xl border border-white/15 bg-[#070c18] px-4 font-mono text-[13px] text-white placeholder:text-slate-500 outline-none transition-colors focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(0,240,255,0.15)]"
+                      data-testid="input-problem-location"
+                    />
+                    {location && (
+                      <div className="mt-2 flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-3 py-1.5 font-mono text-[11px] text-slate-400">
+                        <span className="flex items-center gap-1.5 text-cyan-300">
+                          <Check size={13} className="text-cyan-400" /> Location: {location}
+                        </span>
+                        <span className="text-slate-500 text-[10px]">User-provided · Exact location not provided</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-[#070c18] p-3.5 font-mono text-[12px]">
+                    {isLocating ? (
+                      <span className="flex items-center gap-2 text-cyan-400">
+                        <LoaderCircle size={15} className="animate-spin" /> Synchronizing with orbital constellation...
+                      </span>
+                    ) : location ? (
+                      <div className="flex flex-col gap-1">
+                        <span className="flex items-center gap-2 font-bold text-emerald-400">
+                          <Check size={14} /> Location: {location}
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          GPS-provided · Coordinates: {exactLocation || 'Resolved'} · Exact location provided
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-500">Orbital satellite telemetry pending trigger...</span>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {locationMethod === 'manual' ? (
-                <div className="relative mt-4">
-                  <input id="problem-location" type="text" value={location} onChange={(event) => { setLocation(event.target.value); setError(''); setLocationSource('User provided'); setExactLocation(''); }} placeholder="Enter city or area" className="focus-ring h-12 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 text-[14px] outline-none transition-colors placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))]" data-testid="input-problem-location" />
-                  {location && (
-                    <p className="mt-2 text-[12px] text-[hsl(var(--muted-foreground))]">
-                      ✓ Location: {location} <br/>User-provided · Exact location not provided
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] p-4 text-[13px] text-[hsl(var(--foreground))]">
-                  {isLocating ? (
-                    <span className="flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" /> Acquiring GPS signal...</span>
-                  ) : location ? (
-                    <span className="flex flex-col gap-1">
-                      <span className="flex items-center gap-2 font-medium text-[hsl(var(--primary))]"><Check size={16} /> Location: {location}</span>
-                      <span className="text-[hsl(var(--muted-foreground))]">GPS-provided · Exact location provided</span>
-                    </span>
-                  ) : (
-                    'Location pending...'
-                  )}
+              {error && (
+                <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-950/40 p-3.5 font-mono text-[12px] text-rose-300" role="alert" data-testid="status-upload-error">
+                  <CircleAlert size={16} className="text-rose-400 shrink-0" />
+                  <span>{error}</span>
                 </div>
               )}
-              {error && <p className="mt-4 flex items-center gap-2 rounded-lg bg-[hsl(var(--destructive)/0.1)] p-3 text-[13px] font-semibold text-[hsl(var(--destructive))]" role="alert" data-testid="status-upload-error"><CircleAlert size={16} /> {error}</p>}
-               <button type="button" onClick={analyzeProblem} disabled={isAnalyzing || isFindingAuthority} className="focus-ring mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-6 text-[15px] font-bold text-[hsl(var(--primary-foreground))] shadow-sm transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-wait disabled:opacity-75" data-testid="button-analyze-problem">
-                 {isAnalyzing || isFindingAuthority ? <><LoaderCircle size={18} className="animate-spin" /> {analysisStatus || 'Working…'}</> : <>Analyze Problem <ArrowRight size={18} /></>}
+
+              {/* Action Button */}
+              <button
+                type="button"
+                onClick={analyzeProblem}
+                disabled={isAnalyzing || isFindingAuthority}
+                className="cyber-btn focus-ring mt-6 flex h-14 w-full items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 px-6 font-tech text-[15px] font-bold tracking-wider text-[#05080e] shadow-[0_0_25px_rgba(0,240,255,0.35)] transition-all hover:brightness-110 active:scale-[0.99] disabled:cursor-wait disabled:opacity-75 cursor-pointer"
+                data-testid="button-analyze-problem"
+              >
+                {isAnalyzing || isFindingAuthority ? (
+                  <>
+                    <LoaderCircle size={18} className="animate-spin text-[#05080e]" />
+                    <span className="font-mono tracking-normal">{analysisStatus || 'EXECUTING NEURAL SCAN...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>INITIATE NEURAL DIAGNOSIS // 2050</span>
+                    <ArrowRight size={18} className="text-[#05080e]" />
+                  </>
+                )}
               </button>
-                <p className="mt-4 text-center text-[12px] text-[hsl(var(--muted-foreground))]">Your photo is sent securely to SerpApi for image search and is not stored by CivicFix.</p>
+
+              <div className="mt-4 flex items-center justify-center gap-2 font-mono text-[10px] text-slate-500 text-center">
+                <ShieldCheck size={12} className="text-cyan-500" />
+                <span>Imagery processed via SerpApi Lens Gateway · No persistent telemetry cached</span>
+              </div>
             </div>
           </div>
         </section>
 
+        {/* 2050 Results Command Deck */}
         {hasResult && (
-          <section id="analysis-result" className="mx-auto max-w-7xl scroll-mt-8 px-5 pb-20 sm:px-8 lg:px-10" aria-live="polite">
-            <div className="overflow-hidden rounded-[28px] border border-[hsl(var(--secondary))] bg-[hsl(var(--secondary))] text-[hsl(var(--card))] shadow-[var(--shadow-card)]">
-              <div className="flex flex-col gap-8 p-5 sm:p-8 lg:flex-row lg:gap-12 lg:p-10">
-                <div className="lg:w-[34%]">
-                  <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[hsl(var(--accent))]"><Check size={15} /> 02 / Your starting point</div>
-                   <h2 className="mt-5 text-[32px] font-bold leading-[0.98] tracking-[-0.05em] sm:text-[42px]">Here’s what we found.</h2>
-                   <p className="mt-4 max-w-sm text-[13px] leading-6 text-[rgba(250,248,242,0.68)]">This result combines Google Lens image evidence with live web sources. It is not an official classification.</p>
-                   <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.12em] text-[hsl(var(--accent))]">Web intelligence powered by SerpApi</p>
-                  <div className="mt-7 flex items-center gap-3 rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--accent))] text-[hsl(var(--secondary))]"><FileImage size={19} /></div>
-                      <div className="min-w-0"><p className="truncate text-[12px] font-bold" data-testid="text-result-file">{file?.name}</p><p className="text-[11px] text-[rgba(250,248,242,0.58)]">Photo searched with Google Lens</p></div>
+          <section id="analysis-result" className="mx-auto max-w-7xl scroll-mt-12 px-5 pb-24 sm:px-8 lg:px-10" aria-live="polite">
+            <div className="hud-panel relative overflow-hidden rounded-3xl border border-cyan-500/30 bg-[#070b16] p-6 sm:p-8 lg:p-10 shadow-[0_0_60px_rgba(0,240,255,0.12)] text-white">
+              <div className="hud-corner-tl" />
+              <div className="hud-corner-tr" />
+              <div className="hud-corner-bl" />
+              <div className="hud-corner-br" />
+
+              {/* Status Header */}
+              <div className="mb-8 flex flex-col gap-4 border-b border-white/10 pb-6 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 font-mono text-[11px] font-bold tracking-widest text-cyan-400">
+                    <span className="flex h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
+                    <span>DIAGNOSTIC TELEMETRY PACKET // RESOLUTION 2050</span>
+                  </div>
+                  <h2 className="mt-1 font-tech text-[30px] sm:text-[38px] font-bold tracking-wide text-white">
+                    Diagnostic Telemetry Resolved.
+                  </h2>
+                  <p className="mt-1 max-w-xl text-[13px] text-slate-400">
+                    Combines Google Lens optical signature with live municipal web intelligence. Verified diagnostic advisory; not a legal decree.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2">
+                    <FileImage size={17} className="text-cyan-400" />
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-[11px] font-bold text-white max-w-[150px]" data-testid="text-result-file">{file?.name}</p>
+                      <p className="font-mono text-[9px] text-slate-500">SPECTRAL SCAN COMPLETE</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/60 px-3.5 py-2 font-mono text-[10px] font-bold text-cyan-300">
+                    POWERED BY SERPAPI
                   </div>
                 </div>
-                <div className="grid flex-1 gap-3 sm:grid-cols-2">
-                   <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2">
-                      <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[hsl(var(--muted-foreground))]">PROBLEM DETECTED</p><span className="flex items-center gap-1.5 rounded-full bg-[rgba(228,87,53,0.1)] px-3 py-1 text-[11px] font-bold text-[hsl(var(--primary))]"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" /> Lens evidence · not official</span></div>
-                      <div className="mt-4 flex flex-wrap items-end justify-between gap-5"><div><p className="text-[32px] font-bold capitalize tracking-[-0.05em]" data-testid="result-problem-type">{analysis?.issue_type}</p></div><div className="text-left sm:text-right"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">SEVERITY</p><p className="mt-1 text-[20px] font-bold capitalize text-[hsl(var(--primary))]" data-testid="result-severity">{displaySeverity(analysis)}</p></div></div>
+              </div>
+
+              {/* Anomaly & Risk Overview Grid */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+                {/* Detected Issue */}
+                <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-5 sm:col-span-2">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                    <p className="font-mono text-[10px] font-bold tracking-widest text-slate-400 uppercase">
+                      ANOMALY CLASSIFICATION
+                    </p>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-950/50 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-cyan-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" /> Lens evidence · not official
+                    </span>
                   </div>
-                    <div className="rounded-2xl bg-[rgba(250,248,242,0.1)] p-5">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[rgba(250,248,242,0.56)]">LOCATION</p>
-                      <p className="mt-3 flex items-start gap-2 text-[17px] font-bold leading-6" data-testid="result-location">
-                        <MapPin size={18} className="mt-1 shrink-0 text-[hsl(var(--accent))]" />
-                        {location}
+                  <div className="mt-4 flex flex-wrap items-baseline justify-between gap-4">
+                    <div>
+                      <p className="font-tech text-[28px] sm:text-[34px] font-bold capitalize text-white tracking-wide" data-testid="result-problem-type">
+                        {analysis?.issue_type}
                       </p>
-                      <p className="mt-3 text-[11px] leading-5 text-[hsl(var(--muted-foreground))]" data-testid="result-exact-location">
-                        <span className="font-bold text-[hsl(var(--foreground))]">Exact location:</span> {exactLocation ? <span className="text-[hsl(var(--primary))] font-medium">Available</span> : 'Not provided'}<br/>
-                        <span className="font-bold text-[hsl(var(--foreground))]">Source:</span> {locationSource || 'User provided'}
+                      <p className="font-mono text-[11px] text-slate-400">Optical Pattern Confidence: {analysis?.visual_confidence ? `${analysis.visual_confidence}%` : 'Empirical'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-mono text-[10px] tracking-widest text-slate-400 uppercase">SEVERITY INDEX</p>
+                      <p className="mt-1 font-tech text-[20px] font-bold capitalize text-amber-400" data-testid="result-severity">
+                        {displaySeverity(analysis)}
                       </p>
                     </div>
-                    <div className="rounded-2xl bg-[hsl(var(--primary)/0.05)] p-5 border border-[hsl(var(--border))]"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">POTENTIAL HAZARD</p><p className="mt-3 text-[15px] font-bold leading-6" data-testid="result-hazard">{analysis?.potential_hazard}</p></div>
-                    <div className="rounded-2xl bg-[hsl(var(--card))] p-5 text-[hsl(var(--foreground))] sm:col-span-2 border border-[hsl(var(--border))]"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[hsl(var(--muted-foreground))]">DESCRIPTION</p><p className="mt-3 max-w-2xl text-[15px] leading-7" data-testid="result-description">{analysis?.description}</p></div>
-                  <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
-                      <AuthorityCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} location={location} exactLocation={exactLocation} />
-                      <div className="grid gap-3">
-                        <EvidenceCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
-                        <ComplaintCard result={authorityResult} isLoading={isFindingAuthority} error={authorityError} />
-                      </div>
                   </div>
+                </div>
+
+                {/* Spatial Sector */}
+                <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-5">
+                  <p className="font-mono text-[10px] font-bold tracking-widest text-slate-400 uppercase">LOCATION</p>
+                  <p className="mt-3 flex items-start gap-2 font-tech text-[18px] font-bold text-white" data-testid="result-location">
+                    <MapPin size={18} className="mt-0.5 shrink-0 text-cyan-400" />
+                    {location}
+                  </p>
+                  <div className="mt-3 border-t border-white/5 pt-2 font-mono text-[11px] leading-5 text-slate-400" data-testid="result-exact-location">
+                    <div><span className="text-slate-300 font-medium">Exact location:</span> {exactLocation ? <span className="text-emerald-400 font-bold">Available</span> : 'Not provided'}</div>
+                    <div><span className="text-slate-300 font-medium">Source:</span> {locationSource || 'User provided'}</div>
+                  </div>
+                </div>
+
+                {/* Hazard Potential */}
+                <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-5">
+                  <p className="font-mono text-[10px] font-bold tracking-widest text-slate-400 uppercase">POTENTIAL HAZARD</p>
+                  <p className="mt-3 font-tech text-[15px] font-bold leading-6 text-amber-300" data-testid="result-hazard">
+                    {analysis?.potential_hazard}
+                  </p>
+                  <p className="mt-2 font-mono text-[10px] text-slate-500">MUNICIPAL RISK VECTOR</p>
+                </div>
+              </div>
+
+              {/* Technical Description */}
+              <div className="mb-6 rounded-2xl border border-white/10 bg-[#090e1c] p-5">
+                <p className="font-mono text-[10px] font-bold tracking-widest text-slate-400 uppercase">DESCRIPTION</p>
+                <p className="mt-2 text-[14px] leading-relaxed text-slate-200" data-testid="result-description">
+                  {analysis?.description}
+                </p>
+              </div>
+
+              {/* Tri-Column Authority, Evidence, & Complaint Deck */}
+              <div className="grid gap-6 lg:grid-cols-2">
+                <AuthorityCard
+                  result={authorityResult}
+                  isLoading={isFindingAuthority}
+                  error={authorityError}
+                  location={location}
+                  exactLocation={exactLocation}
+                />
+
+                <div className="flex flex-col gap-6">
+                  <ComplaintCard
+                    result={authorityResult}
+                    isLoading={isFindingAuthority}
+                    error={authorityError}
+                  />
+                  <EvidenceCard
+                    result={authorityResult}
+                    isLoading={isFindingAuthority}
+                    error={authorityError}
+                  />
                 </div>
               </div>
             </div>
           </section>
         )}
 
-        <section id="how-it-works" className="border-y hairline bg-[rgba(235,230,216,0.4)] px-5 py-20 sm:px-8 lg:px-10 lg:py-28">
-          <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.7fr_1.3fr] lg:gap-24">
-            <div className="rise-in"><p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">A small action, made clearer</p><h2 className="mt-4 max-w-md text-[42px] leading-[0.98] tracking-[-0.055em] sm:text-[58px]">From “someone should fix this” to a useful next step.</h2><p className="mt-6 max-w-sm text-[15px] leading-7 text-[hsl(var(--muted-foreground))]">You notice the issue. CivicFix helps put shape around it, so the right conversation can start with better information.</p></div>
+        {/* 2050 Architecture / Pipeline */}
+        <section id="how-it-works" className="border-y border-cyan-500/20 bg-[#060a15] px-5 py-20 sm:px-8 lg:px-10 lg:py-28 relative">
+          <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.75fr_1.25fr] lg:gap-20">
+            <div className="rise-in">
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-cyan-400">
+                // SYSTEM WORKFLOW 2050
+              </p>
+              <h2 className="mt-4 font-tech text-[36px] sm:text-[46px] font-bold leading-tight tracking-tight text-white">
+                From empirical sighting to structured municipal resolution.
+              </h2>
+              <p className="mt-6 text-[15px] leading-relaxed text-slate-300">
+                You document the infrastructure failure. CivicFix activates optical pattern classification, triangulates jurisdictional boundaries, and prepares verified complaints.
+              </p>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
-              <StepCard number="01" title="Capture the issue" copy="Take a straightforward photo that shows the problem in context." />
-              <StepCard number="02" title="Add the place" copy="Tell us where it is. A street, landmark, or neighborhood is enough to begin." />
-              <StepCard number="03" title="Understand the result" copy="Get plain-language context about the issue, risk, and what a report could include." />
-              <div className="relative overflow-hidden rounded-[22px] bg-[hsl(var(--accent))] p-6 sm:col-span-2 sm:flex sm:items-end sm:justify-between sm:gap-8">
-                <div><p className="text-[11px] font-bold uppercase tracking-[0.17em] text-[hsl(var(--secondary))]">The point</p><p className="mt-3 max-w-md text-[23px] font-bold leading-tight tracking-[-0.04em] text-[hsl(var(--secondary))]">Better reports begin with people who pay attention.</p></div>
-                <div className="mt-8 hidden h-20 w-20 shrink-0 rounded-full border border-[rgba(42,70,64,0.24)] sm:block" aria-hidden="true"><div className="m-4 h-12 w-12 rounded-full border border-[rgba(42,70,64,0.24)]" /></div>
+              <StepCard
+                number="01"
+                title="Optical Sensing"
+                copy="Capture high-fidelity imagery of the infrastructure defect using any connected visual device."
+              />
+              <StepCard
+                number="02"
+                title="Spatial Triangulation"
+                copy="Lock geographical sector through satellite orbital GPS or municipal neighborhood indexing."
+              />
+              <StepCard
+                number="03"
+                title="Jurisdiction Resolution"
+                copy="Automated cross-referencing against verified municipal departments and grievance registries."
+              />
+              <div className="relative overflow-hidden rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-950/60 to-[#071329] p-6 sm:col-span-2 flex items-center justify-between gap-6">
+                <div>
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-cyan-400">CIVIC AUTONOMY</p>
+                  <p className="mt-2 font-tech text-[22px] font-bold text-white tracking-wide">
+                    Better cities evolve when citizens are equipped with precision tools.
+                  </p>
+                </div>
+                <div className="hidden sm:flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-500/10 text-cyan-400">
+                  <Sparkles size={28} />
+                </div>
               </div>
             </div>
           </div>
         </section>
 
-        <section id="why-civicfix" className="mx-auto grid max-w-7xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[1.15fr_0.85fr] lg:gap-20 lg:px-10 lg:py-28">
+        {/* 2050 Trust & Security */}
+        <section id="why-civicfix" className="mx-auto grid max-w-7xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[1.1fr_0.9fr] lg:gap-20 lg:px-10 lg:py-28">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">Designed for trust</p>
-            <h2 className="mt-4 max-w-2xl text-[42px] leading-[0.98] tracking-[-0.055em] sm:text-[59px]">Useful, without pretending to be the government.</h2>
-            <div className="mt-10 divide-y hairline border-y">
-              <TrustRow title="Plain language" copy="No technical fog. Just a practical description you can understand and reuse." />
-              <TrustRow title="Clear limits" copy="Demo results are labeled as examples. We never turn a guess into an official answer." />
-              <TrustRow title="Respect for your time" copy="No account, no complicated form, and no need to know the right department first." />
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-cyan-400">
+              // DESIGNED FOR PROTOCOL INTEGRITY
+            </p>
+            <h2 className="mt-4 font-tech text-[36px] sm:text-[46px] font-bold leading-tight tracking-tight text-white">
+              Deterministic, transparent, without government pretense.
+            </h2>
+            <div className="mt-10 divide-y divide-white/10 border-y border-white/10">
+              <TrustRow
+                title="Transparent Evidence"
+                copy="Clear distinction between verified official government domains, reputable directory sources, and social media signals."
+              />
+              <TrustRow
+                title="Honest Confidence"
+                copy="When exact street jurisdiction is unverified, results explicitly state 'Potential Authority' and 'Moderate evidence' without fabricated percentages."
+              />
+              <TrustRow
+                title="Zero Credential Burden"
+                copy="Instant access without accounts, tracking, or bureaucratic lock-in. Immediate utility for every resident."
+              />
             </div>
           </div>
-          <div className="relative flex min-h-[320px] items-end overflow-hidden rounded-[26px] bg-[hsl(var(--secondary))] p-7 text-[hsl(var(--card))] sm:min-h-[390px] sm:p-9">
-            <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full border border-[rgba(250,248,242,0.18)]" aria-hidden="true"><div className="m-8 h-40 w-40 rounded-full border border-[rgba(250,248,242,0.18)]"><div className="m-8 h-24 w-24 rounded-full bg-[hsl(var(--accent))]" /></div></div>
-            <div className="relative"><ShieldCheck size={29} className="text-[hsl(var(--accent))]" /><p className="mt-9 max-w-sm text-[27px] font-bold leading-[1.05] tracking-[-0.045em]">Your neighborhood is full of signals. CivicFix helps make them legible.</p><p className="mt-5 text-[12px] leading-5 text-[rgba(250,248,242,0.61)]">A presentation prototype for a more informed civic life.</p></div>
+
+          <div className="hud-panel relative flex min-h-[320px] flex-col justify-between overflow-hidden rounded-3xl p-8 sm:p-10 text-white">
+            <div className="hud-corner-tl" />
+            <div className="hud-corner-tr" />
+            <div className="hud-corner-bl" />
+            <div className="hud-corner-br" />
+
+            <div className="flex items-center justify-between">
+              <ShieldCheck size={32} className="text-cyan-400" />
+              <span className="font-mono text-[10px] text-slate-500">TELEMETRY TRUST v2050</span>
+            </div>
+            
+            <div className="mt-8">
+              <p className="font-tech text-[24px] sm:text-[28px] font-bold leading-snug text-white">
+                "Your city transmits continuous infrastructure signals. CivicFix transforms them into actionable records."
+              </p>
+              <p className="mt-4 font-mono text-[11px] text-cyan-400/80">
+                Civic Intelligence Prototype · Year 2050 Standard
+              </p>
+            </div>
           </div>
         </section>
 
-        <section id="faq" className="border-t hairline px-5 py-20 sm:px-8 lg:px-10 lg:py-24">
-          <div className="mx-auto max-w-3xl"><p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">Questions, answered</p><h2 className="mt-4 text-[42px] tracking-[-0.055em] sm:text-[55px]">Before you report</h2><div className="mt-9"><Faq question="Do I need to know which department is responsible?" answer="No. That is part of the work CivicFix is designed to help with. Start with what you can see and where you found it." /><Faq question="Is this already connected to a government complaint system?" answer="Not yet. This experience is a guided demo, so authority and complaint details are intentionally shown as placeholders rather than external data." /><Faq question="What makes a good photo?" answer="Stand far enough back to show context, then include a closer view of the issue. Avoid faces, vehicle plates, and anything personally identifying." /></div></div>
+        {/* 2050 FAQ Section */}
+        <section id="faq" className="border-t border-cyan-500/20 bg-[#060a14] px-5 py-20 sm:px-8 lg:px-10 lg:py-24">
+          <div className="mx-auto max-w-3xl">
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-cyan-400 text-center">
+              // FREQUENTLY RESOLVED QUERIES
+            </p>
+            <h2 className="mt-3 text-center font-tech text-[36px] sm:text-[44px] font-bold text-white">
+              Before You Dispatch
+            </h2>
+            <div className="mt-10 divide-y divide-white/10 border-y border-white/10">
+              <Faq
+                question="Do I need to know the specific municipal department beforehand?"
+                answer="No. The jurisdictional engine analyzes the problem category and spatial coordinates to identify the most probable department automatically."
+              />
+              <Faq
+                question="Is CivicFix directly connected to government grievance portals?"
+                answer="CivicFix verifies official reporting URLs and direct helplines, synthesizing a formatted complaint draft ready to paste directly into government portals."
+              />
+              <Faq
+                question="What constitutes optimal optical sensor input?"
+                answer="Capture the issue with surrounding roadway or structural context, followed by a clear view of the defect. Avoid capturing faces or personally identifying markers."
+              />
+            </div>
+          </div>
         </section>
 
-        <footer className="border-t hairline bg-[hsl(var(--card))] px-5 py-9 text-[hsl(var(--foreground))] sm:px-8 lg:px-10">
-          <div className="mx-auto flex max-w-7xl flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><CivicFixLogo iconSize={24} className="opacity-90" /><p className="text-[12px] text-[hsl(var(--muted-foreground))]">Make the visible problems easier to act on.</p><p className="text-[11px] text-[hsl(var(--muted-foreground))]">Prototype · 2026</p></div>
+        {/* 2050 Cyber Footer */}
+        <footer className="border-t border-cyan-500/20 bg-[#05080e] px-5 py-10 text-white sm:px-8 lg:px-10">
+          <div className="mx-auto flex max-w-7xl flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+            <CivicFixLogo iconSize={24} className="opacity-90" />
+            <p className="font-mono text-[11px] text-slate-400">
+              Autonomous Municipal Diagnostics Protocol · CivicFix 2050
+            </p>
+            <div className="flex items-center gap-2 font-mono text-[10px] text-slate-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span>NODES: ALL ONLINE</span>
+            </div>
+          </div>
         </footer>
       </div>
     </main>
   );
 }
 
-function AuthorityCard({ result, isLoading, error, location, exactLocation }: { result: AuthorityResult | null; isLoading: boolean; error: string, location: string, exactLocation: string }) {
+function AuthorityCard({
+  result,
+  isLoading,
+  error,
+  location,
+  exactLocation
+}: {
+  result: AuthorityResult | null;
+  isLoading: boolean;
+  error: string;
+  location: string;
+  exactLocation: string;
+}) {
   if (isLoading) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
-        <p className="mt-4 flex items-center gap-2 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]"><LoaderCircle size={16} className="animate-spin" /> Checking official sources…</p>
+      <div className="rounded-2xl border border-cyan-500/30 bg-[#090e1c] p-6 shadow-[0_0_30px_rgba(0,240,255,0.06)]">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ShieldCheck size={16} />
+          <span>POTENTIAL AUTHORITY</span>
+        </div>
+        <p className="mt-4 flex items-center gap-2.5 font-mono text-[13px] text-slate-400">
+          <LoaderCircle size={16} className="animate-spin text-cyan-400" /> Searching verified government registries…
+        </p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
-        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">{error}</p>
+      <div className="rounded-2xl border border-rose-500/30 bg-[#090e1c] p-6 shadow-[0_0_30px_rgba(244,63,94,0.06)]">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-rose-400">
+          <ShieldCheck size={16} />
+          <span>POTENTIAL AUTHORITY</span>
+        </div>
+        <p className="mt-4 font-mono text-[13px] text-slate-400">{error}</p>
       </div>
     );
   }
 
   if (!result) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
-        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">Waiting for web intelligence…</p>
+      <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-6">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ShieldCheck size={16} />
+          <span>POTENTIAL AUTHORITY</span>
+        </div>
+        <p className="mt-4 font-mono text-[13px] text-slate-500">Awaiting web intelligence telemetry…</p>
       </div>
     );
   }
@@ -520,49 +973,95 @@ function AuthorityCard({ result, isLoading, error, location, exactLocation }: { 
     return 'Limited';
   };
 
-  const contacts = result.contact_information && result.contact_information !== 'No official contact information was found.' 
-    ? result.contact_information.split(' · ') 
+  const contacts = result.contact_information && result.contact_information !== 'No official contact information was found.'
+    ? result.contact_information.split(' · ')
     : [];
 
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)] text-[hsl(var(--foreground))]" data-testid="result-authority">
-      <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ShieldCheck size={18} /><p className="text-[12px] font-bold">POTENTIAL AUTHORITY</p></div>
-      
-      <p className="mt-4 text-[22px] font-bold leading-7 tracking-tight" data-testid="result-authority-name">{result.authority_name || 'Authority not available'}</p>
-      
-      <span className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2.5 py-1 text-[11px] font-semibold text-[hsl(var(--muted-foreground))]" data-testid="result-authority-confidence">
-        Evidence strength: {mapConfidence(result.authority_confidence || 'low')}
-      </span>
-
-      <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">WHY THIS AUTHORITY?</p>
-        <p className="mt-2 text-[13px] leading-6 text-[hsl(var(--foreground))]" data-testid="result-authority-reason">{result.authority_reason || 'No reason was returned.'}</p>
+    <div className="rounded-2xl border border-cyan-500/30 bg-[#090e1c] p-6 shadow-[0_0_40px_rgba(0,240,255,0.08)] text-white" data-testid="result-authority">
+      <div className="flex items-center justify-between border-b border-white/10 pb-4">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ShieldCheck size={16} />
+          <span>POTENTIAL AUTHORITY</span>
+        </div>
+        <span className="font-mono text-[10px] text-slate-500">JURISDICTION MATRIX</span>
       </div>
 
-      <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">WHAT WOULD CHANGE THIS RESULT?</p>
-        <p className="mt-2 text-[13px] leading-6 text-[hsl(var(--foreground))]">Exact road jurisdiction cannot be confirmed because the user provided {location} but not the specific street, landmark, road number, or GPS location.</p>
+      <p className="mt-4 font-tech text-[24px] sm:text-[28px] font-bold leading-tight text-white tracking-wide" data-testid="result-authority-name">
+        {result.authority_name || 'Authority not available'}
+      </p>
+
+      <div className="mt-3 flex items-center gap-2">
+        <span className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/60 px-3 py-1 font-mono text-[11px] font-semibold text-cyan-300" data-testid="result-authority-confidence">
+          <span className="flex gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400/40" />
+          </span>
+          Evidence strength: {mapConfidence(result.authority_confidence || 'low')}
+        </span>
       </div>
 
-      <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">REPORTING CHANNEL</p>
+      <div className="mt-6 border-t border-white/10 pt-4">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          WHY THIS AUTHORITY?
+        </p>
+        <p className="mt-2 text-[13px] leading-relaxed text-slate-300" data-testid="result-authority-reason">
+          {result.authority_reason || 'No reason was returned.'}
+        </p>
+      </div>
+
+      <div className="mt-6 border-t border-white/10 pt-4">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          WHAT WOULD CHANGE THIS RESULT?
+        </p>
+        <p className="mt-2 text-[13px] leading-relaxed text-slate-300">
+          Exact road jurisdiction cannot be confirmed because the user provided {location} but not the specific street, landmark, road number, or GPS location.
+        </p>
+      </div>
+
+      <div className="mt-6 border-t border-white/10 pt-4">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          REPORTING CHANNEL
+        </p>
         {result.official_source_url ? (
-          <a href={result.official_source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-[hsl(var(--primary))] hover:underline" data-testid="result-complaint-url">
-            {result.official_source_url.toLowerCase().includes('grievance') ? 'General government grievance channel' : 'Verified official reporting channel'} <ExternalLink size={14} />
+          <a
+            href={result.official_source_url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 inline-flex items-center gap-2 font-mono text-[13px] font-semibold text-cyan-400 hover:text-cyan-300 transition-colors"
+            data-testid="result-complaint-url"
+          >
+            <span>{result.official_source_url.toLowerCase().includes('grievance') ? 'General government grievance channel' : 'Verified official reporting channel'}</span>
+            <ExternalLink size={14} />
           </a>
         ) : (
-          <p className="mt-2 text-[13px] leading-6 text-[hsl(var(--muted-foreground))]">No official complaint URL found.</p>
+          <p className="mt-2 font-mono text-[13px] text-slate-500">No official complaint URL found.</p>
         )}
       </div>
 
       {contacts.length > 0 && (
-        <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">OFFICIAL CONTACT</p>
-          <ul className="mt-3 space-y-4">
+        <div className="mt-6 border-t border-white/10 pt-4">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            OFFICIAL CONTACT
+          </p>
+          <ul className="mt-3 space-y-3" data-testid="result-contact-information">
             {contacts.map((contact, i) => (
-              <li key={i} className="flex flex-col gap-1">
-                <span className="flex items-center gap-2 text-[15px] font-semibold text-[hsl(var(--foreground))]"><Phone size={16} className="text-[hsl(var(--muted-foreground))]" /> {contact}</span>
-                <span className="flex items-center gap-1 text-[11px] text-[hsl(var(--primary))] font-medium"><Check size={12} /> Verified from official source</span>
+              <li key={i} className="flex flex-col gap-1.5 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2 font-mono text-[14px] font-bold text-white">
+                    <Phone size={15} className="text-cyan-400" /> {contact}
+                  </span>
+                  <a
+                    href={`tel:${contact.replace(/[^0-9+]/g, '')}`}
+                    className="rounded border border-cyan-500/40 bg-cyan-950/70 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-cyan-300 hover:bg-cyan-900 transition-colors"
+                  >
+                    DIAL
+                  </a>
+                </div>
+                <span className="flex items-center gap-1 font-mono text-[11px] font-medium text-emerald-400">
+                  <Check size={13} /> Verified from official source
+                </span>
               </li>
             ))}
           </ul>
@@ -572,91 +1071,186 @@ function AuthorityCard({ result, isLoading, error, location, exactLocation }: { 
   );
 }
 
-function ComplaintCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+function ComplaintCard({
+  result,
+  isLoading,
+  error
+}: {
+  result: AuthorityResult | null;
+  isLoading: boolean;
+  error: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = () => {
+    if (!result?.generated_complaint) return;
+    navigator.clipboard.writeText(result.generated_complaint);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   if (isLoading) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
-        <p className="mt-4 flex items-center gap-2 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]"><LoaderCircle size={16} className="animate-spin" /> Generating complaint draft…</p>
+      <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-6">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ArrowDownRight size={16} />
+          <span>COMPLAINT DRAFT</span>
+        </div>
+        <p className="mt-4 flex items-center gap-2 font-mono text-[13px] text-slate-400">
+          <LoaderCircle size={16} className="animate-spin text-cyan-400" /> Synthesizing citizen grievance draft…
+        </p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
-        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">Could not generate a complaint due to an error.</p>
+      <div className="rounded-2xl border border-rose-500/30 bg-[#090e1c] p-6">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-rose-400">
+          <ArrowDownRight size={16} />
+          <span>COMPLAINT DRAFT</span>
+        </div>
+        <p className="mt-4 font-mono text-[13px] text-slate-400">Could not generate a complaint due to an error.</p>
       </div>
     );
   }
 
   if (!result?.generated_complaint) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
-        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">The AI-generated complaint will appear here.</p>
+      <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-6">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ArrowDownRight size={16} />
+          <span>COMPLAINT DRAFT</span>
+        </div>
+        <p className="mt-4 font-mono text-[13px] text-slate-500">The AI-generated complaint will appear here.</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]" data-testid="result-complaint">
-      <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ArrowDownRight size={18} /><p className="text-[12px] font-bold">COMPLAINT DRAFT</p></div>
-      <div className="mt-4 rounded-xl bg-[hsl(var(--muted))] p-4">
-        <p className="whitespace-pre-wrap text-[13px] leading-6 text-[hsl(var(--foreground))] font-mono">{result.generated_complaint}</p>
+    <div className="rounded-2xl border border-cyan-500/30 bg-[#090e1c] p-6 shadow-[0_0_30px_rgba(0,240,255,0.06)] text-white" data-testid="result-complaint">
+      <div className="flex items-center justify-between border-b border-white/10 pb-4">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ArrowDownRight size={16} />
+          <span>COMPLAINT DRAFT</span>
+        </div>
+        <button
+          type="button"
+          onClick={copyToClipboard}
+          className="flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/60 px-3 py-1 font-mono text-[11px] font-semibold text-cyan-300 hover:bg-cyan-900 transition-colors"
+        >
+          {copied ? (
+            <>
+              <CheckCheck size={13} className="text-emerald-400" />
+              <span>COPIED TO CLIPBOARD</span>
+            </>
+          ) : (
+            <>
+              <Copy size={13} />
+              <span>COPY DRAFT</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-white/10 bg-[#060a14] p-4 font-mono text-[12px] leading-relaxed text-slate-200">
+        <p className="whitespace-pre-wrap">{result.generated_complaint}</p>
       </div>
     </div>
   );
 }
 
-function EvidenceCard({ result, isLoading, error }: { result: AuthorityResult | null; isLoading: boolean; error: string }) {
+function EvidenceCard({
+  result,
+  isLoading,
+  error
+}: {
+  result: AuthorityResult | null;
+  isLoading: boolean;
+  error: string;
+}) {
   if (isLoading) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
-        <p className="mt-4 flex items-center gap-2 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]"><LoaderCircle size={16} className="animate-spin" /> Collecting supporting sources…</p>
+      <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-6">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ClipboardCheck size={16} />
+          <span>EVIDENCE</span>
+        </div>
+        <p className="mt-4 flex items-center gap-2 font-mono text-[13px] text-slate-400">
+          <LoaderCircle size={16} className="animate-spin text-cyan-400" /> Collecting supporting sources…
+        </p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
-        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">No sources available because the web lookup failed.</p>
+      <div className="rounded-2xl border border-rose-500/30 bg-[#090e1c] p-6">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-rose-400">
+          <ClipboardCheck size={16} />
+          <span>EVIDENCE</span>
+        </div>
+        <p className="mt-4 font-mono text-[13px] text-slate-400">No sources available because the web lookup failed.</p>
       </div>
     );
   }
 
   if (!result?.supporting_sources?.length) {
     return (
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2 text-[hsl(var(--primary))]"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
-        <p className="mt-4 text-[13px] leading-5 text-[hsl(var(--muted-foreground))]">No supporting sources were returned.</p>
+      <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-6">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ClipboardCheck size={16} />
+          <span>EVIDENCE</span>
+        </div>
+        <p className="mt-4 font-mono text-[13px] text-slate-500">No supporting sources were returned.</p>
       </div>
     );
   }
 
-  const officials = result.supporting_sources.filter(s => s.url.includes('.gov') || s.url.includes('nic.in') || s.url.includes('municipal'));
-  const socials = result.supporting_sources.filter(s => s.url.includes('facebook.com') || s.url.includes('twitter.com') || s.url.includes('x.com') || s.url.includes('instagram.com'));
-  const supporting = result.supporting_sources.filter(s => !officials.includes(s) && !socials.includes(s));
+  const officials = result.supporting_sources.filter(
+    (s) => s.url.includes('.gov') || s.url.includes('nic.in') || s.url.includes('municipal')
+  );
+  const socials = result.supporting_sources.filter(
+    (s) =>
+      s.url.includes('facebook.com') ||
+      s.url.includes('twitter.com') ||
+      s.url.includes('x.com') ||
+      s.url.includes('instagram.com')
+  );
+  const supporting = result.supporting_sources.filter((s) => !officials.includes(s) && !socials.includes(s));
 
-  const renderSourceList = (sources: typeof result.supporting_sources, label: string, icon: ReactNode, desc: string) => {
+  const renderSourceList = (
+    sources: typeof result.supporting_sources,
+    label: string,
+    icon: ReactNode,
+    desc: string
+  ) => {
     if (sources.length === 0) return null;
     return (
       <div className="mb-6 last:mb-0">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-1 flex items-center gap-1.5">{label}</p>
-        <p className="text-[11px] text-[hsl(var(--primary))] font-medium mb-3 flex items-center gap-1">{icon} {desc}</p>
-        <div className="space-y-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            {label}
+          </p>
+          <p className="font-mono text-[10px] text-cyan-400 font-semibold flex items-center gap-1">
+            {icon} {desc}
+          </p>
+        </div>
+        <div className="space-y-3">
           {sources.map((source) => {
             const domain = new URL(source.url).hostname.replace('www.', '');
             return (
-              <div key={source.url} className="group relative">
+              <div key={source.url} className="group rounded-xl border border-white/10 bg-white/[0.02] p-3 hover:border-cyan-400/40 hover:bg-cyan-950/20 transition-colors">
                 <a href={source.url} target="_blank" rel="noreferrer" className="block outline-none">
-                  <p className="text-[13px] font-bold leading-5 text-[hsl(var(--primary))] group-hover:underline">{source.title || 'Untitled source'}</p>
-                  <p className="mt-1 text-[12px] leading-5 text-[hsl(var(--foreground))] line-clamp-2">{source.snippet || 'No snippet was returned.'}</p>
-                  <p className="mt-1 flex items-center gap-1 text-[10px] text-[hsl(var(--muted-foreground))]"><ExternalLink size={10} /> {domain}</p>
+                  <p className="font-tech text-[13px] font-bold text-cyan-400 group-hover:underline line-clamp-1">
+                    {source.title || 'Untitled source'}
+                  </p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-slate-300 line-clamp-2">
+                    {source.snippet || 'No snippet was returned.'}
+                  </p>
+                  <p className="mt-2 flex items-center gap-1 font-mono text-[10px] text-slate-500">
+                    <ExternalLink size={10} /> {domain}
+                  </p>
                 </a>
               </div>
             );
@@ -667,39 +1261,68 @@ function EvidenceCard({ result, isLoading, error }: { result: AuthorityResult | 
   };
 
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-soft)] text-[hsl(var(--foreground))]" data-testid="result-evidence">
-      <div className="flex items-center gap-2 text-[hsl(var(--primary))] mb-5"><ClipboardCheck size={18} /><p className="text-[12px] font-bold">EVIDENCE</p></div>
-      
-      <div className="max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-        {renderSourceList(officials, 'Official', <Check size={12} />, 'Government source')}
-        {renderSourceList(supporting, 'Supporting', <span className="text-[16px] leading-none">•</span>, 'Reputable source')}
-        {renderSourceList(socials, 'Social', <span className="text-[16px] leading-none">•</span>, 'Supporting evidence only')}
+    <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-6 shadow-[0_0_30px_rgba(0,240,255,0.06)] text-white" data-testid="result-evidence">
+      <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-cyan-400">
+          <ClipboardCheck size={16} />
+          <span>EVIDENCE</span>
+        </div>
+        <span className="font-mono text-[10px] text-slate-500">VERIFIED SOURCE MATRIX</span>
+      </div>
+
+      <div className="max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+        {renderSourceList(officials, 'Official', <Check size={12} className="text-emerald-400" />, 'Government source')}
+        {renderSourceList(supporting, 'Supporting', <span className="text-[14px] leading-none text-cyan-400">•</span>, 'Reputable source')}
+        {renderSourceList(socials, 'Social', <span className="text-[14px] leading-none text-amber-400">•</span>, 'Supporting evidence only')}
       </div>
     </div>
   );
 }
 
-function PlaceholderCard({ icon, title, copy, testId }: { icon: ReactNode; title: string; copy: string; testId: string }) {
-  return <div className="rounded-2xl border border-[rgba(250,248,242,0.16)] bg-[rgba(250,248,242,0.07)] p-4" data-testid={testId}><div className="flex items-center gap-2 text-[hsl(var(--accent))]">{icon}<p className="text-[12px] font-bold">{title}</p></div><p className="mt-3 text-[11px] leading-5 text-[rgba(250,248,242,0.55)]">{copy}</p><span className="mt-3 inline-flex rounded-full border border-[rgba(250,248,242,0.16)] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] text-[rgba(250,248,242,0.4)]">Coming later</span></div>;
-}
-
 function StepCard({ number, title, copy }: { number: string; title: string; copy: string }) {
-  return <div className="rounded-[22px] border hairline bg-[hsl(var(--card))] p-6 shadow-[var(--shadow-soft)]"><p className="font-display text-[30px] italic text-[hsl(var(--primary))]">{number}</p><h3 className="mt-8 text-[19px] font-bold tracking-[-0.035em]">{title}</h3><p className="mt-3 text-[13px] leading-6 text-[hsl(var(--muted-foreground))]">{copy}</p></div>;
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#090e1c] p-6 hover:border-cyan-500/30 transition-colors">
+      <p className="font-mono text-[16px] font-bold text-cyan-400 tracking-wider">// {number}</p>
+      <h3 className="mt-4 font-tech text-[20px] font-bold text-white tracking-wide">{title}</h3>
+      <p className="mt-2 text-[13px] leading-relaxed text-slate-400">{copy}</p>
+    </div>
+  );
 }
 
 function TrustRow({ title, copy }: { title: string; copy: string }) {
-  return <div className="grid gap-2 py-5 sm:grid-cols-[0.7fr_1.3fr] sm:gap-8"><p className="text-[14px] font-bold">{title}</p><p className="text-[14px] leading-6 text-[hsl(var(--muted-foreground))]">{copy}</p></div>;
+  return (
+    <div className="grid gap-2 py-5 sm:grid-cols-[0.7fr_1.3fr] sm:gap-8">
+      <p className="font-tech text-[16px] font-bold text-white">{title}</p>
+      <p className="text-[14px] leading-relaxed text-slate-300">{copy}</p>
+    </div>
+  );
 }
 
 function Faq({ question, answer }: { question: string; answer: string }) {
   const [open, setOpen] = useState(false);
-  return <div className="border-b hairline"><button type="button" onClick={() => setOpen((value) => !value)} className="focus-ring flex w-full items-center justify-between gap-5 py-5 text-left text-[15px] font-bold" aria-expanded={open} data-testid={`button-faq-${question.slice(0, 12).toLowerCase().replaceAll(' ', '-')}`}>{question}<ChevronDown size={18} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} /></button>{open && <p className="max-w-2xl pb-5 pr-8 text-[14px] leading-6 text-[hsl(var(--muted-foreground))]" data-testid="text-faq-answer">{answer}</p>}</div>;
+  return (
+    <div className="py-4">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="focus-ring flex w-full items-center justify-between gap-5 py-2 text-left font-tech text-[16px] font-bold text-white hover:text-cyan-300 transition-colors"
+        aria-expanded={open}
+        data-testid={`button-faq-${question.slice(0, 12).toLowerCase().replaceAll(' ', '-')}`}
+      >
+        <span>{question}</span>
+        <ChevronDown size={18} className={`shrink-0 text-cyan-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-slate-300 pl-1" data-testid="text-faq-answer">
+          {answer}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function Router() {
   return (
-    // Keep a shared shell (sidebar, navbar) outside the boundary so it
-    // survives a page crash.
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={Home} />

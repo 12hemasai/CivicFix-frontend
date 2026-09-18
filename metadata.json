@@ -1,0 +1,6 @@
+{
+  "name": "CivicFix",
+  "description": "Civic problem analysis and municipal authority resolver",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

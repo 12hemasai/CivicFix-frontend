@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
+import fs from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
@@ -37,25 +38,64 @@ app.use((req, res, next) => {
   next();
 });
 
+// Set default Content-Type for all /api endpoints
+app.use("/api", (req, res, next) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  next();
+});
+
 app.use("/api", router);
 app.use("/", router);
 
+// Explicit 404 for unhandled /api requests
 app.use("/api", (req, res) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.status(404).json({ error: "API route not found" });
 });
 
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error(err);
-  const status = err.status || (err.name === 'MulterError' ? 400 : 500);
-  const message = err.message || "Internal Server Error";
-  res.status(status).json({ error: message });
+// Resolve client dist path safely
+const candidateDistPaths = [
+  path.resolve(process.cwd(), "artifacts/civicfix/dist/public"),
+  path.resolve(process.cwd(), "../civicfix/dist/public"),
+  path.resolve(__dirname, "../../civicfix/dist/public"),
+  path.resolve(__dirname, "../../../artifacts/civicfix/dist/public"),
+  path.resolve(__dirname, "../artifacts/civicfix/dist/public"),
+  path.resolve(__dirname, "../civicfix/dist/public"),
+  path.resolve(process.cwd(), "dist/public"),
+];
+const clientDistPath = candidateDistPaths.find((p) => fs.existsSync(path.join(p, "index.html"))) || candidateDistPaths.find((p) => fs.existsSync(p)) || candidateDistPaths[0];
+
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+}
+
+// Fallback: Only serve index.html for non-API GET/HEAD requests
+app.use((req, res, next) => {
+  const isApi = req.originalUrl.startsWith("/api") || req.path.startsWith("/api") || req.url.startsWith("/api");
+  const isJsonExpected = req.headers.accept?.includes("application/json") || req.headers["content-type"]?.includes("application/json");
+
+  if (isApi || isJsonExpected || (req.method !== "GET" && req.method !== "HEAD")) {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.status(404).json({ error: `Route ${req.method} ${req.originalUrl} not found` });
+    return;
+  }
+
+  const indexPath = path.join(clientDistPath, "index.html");
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.status(404).json({ error: "Frontend application build not found" });
+  }
 });
 
-const clientDistPath = path.resolve(process.cwd(), "../civicfix/dist/public");
-app.use(express.static(clientDistPath));
-
-app.use((req, res) => {
-  res.sendFile(path.join(clientDistPath, "index.html"));
+// Global error handler - must be last
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  logger.error(err);
+  const status = typeof err.status === "number" ? err.status : (err.name === "MulterError" ? 400 : 500);
+  const message = err.message || "Internal Server Error";
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.status(status).json({ error: message });
 });
 
 export default app;
